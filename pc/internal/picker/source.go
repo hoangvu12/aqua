@@ -217,10 +217,12 @@ func (s *riotSource) snapshotLocked(ctx context.Context) (Snapshot, error) {
 }
 
 // lobbyStats returns cached tracker rows for the given match, kicking off a
-// one-shot background fetch when the match changes. It returns whatever is
-// cached right now — empty while a fetch is in flight — so the poll never
-// blocks; the next poll (~1 Hz) picks up the filled cache and re-emits. Caller
-// need not hold s.mu (this guards its own state).
+// background fetch for any players not cached yet. The roster grows across the
+// same match id — agent select shows only the 5 allies, but core-game shows all
+// 10 — so we fetch the *missing* puuids and merge, rather than fetching once and
+// never again (which left the enemy team stuck on "Loading"). It returns
+// whatever is cached right now so the poll never blocks; the next poll (~1 Hz)
+// picks up the filled cache and re-emits. Caller need not hold s.mu.
 func (s *riotSource) lobbyStats(c *riot.Client, matchID, queue string, puuids []string) map[string]riot.PlayerStats {
 	s.statsMu.Lock()
 	defer s.statsMu.Unlock()
@@ -229,17 +231,25 @@ func (s *riotSource) lobbyStats(c *riot.Client, matchID, queue string, puuids []
 		// New match → drop the old cache and (below) refetch.
 		s.statsKey, s.statsByPUUID, s.statsFetching = matchID, nil, false
 	}
-	if matchID != "" && len(puuids) > 0 && s.statsByPUUID == nil && !s.statsFetching {
+
+	// Players we don't have a row for yet (the enemy team appears only once the
+	// match goes live). Fetch just these so allies cached in agent select stay.
+	missing := missingPUUIDs(s.statsByPUUID, puuids)
+	if matchID != "" && len(missing) > 0 && !s.statsFetching {
 		s.statsFetching = true
-		ps := append([]string(nil), puuids...) // own a copy for the goroutine
 		key := matchID
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			res := c.LobbyStats(ctx, ps, queue, recentMatchesN)
+			res := c.LobbyStats(ctx, missing, queue, recentMatchesN)
 			s.statsMu.Lock()
 			if s.statsKey == key { // ignore if the match changed mid-fetch
-				s.statsByPUUID = res
+				if s.statsByPUUID == nil {
+					s.statsByPUUID = make(map[string]riot.PlayerStats, len(res))
+				}
+				for k, v := range res {
+					s.statsByPUUID[k] = v
+				}
 			}
 			s.statsFetching = false
 			s.statsMu.Unlock()
@@ -251,6 +261,22 @@ func (s *riotSource) lobbyStats(c *riot.Client, matchID, queue string, puuids []
 		out[k] = v
 	}
 	return out
+}
+
+// missingPUUIDs returns the requested puuids that aren't in the cache yet, so a
+// growing roster (allies → both teams) only fetches the newcomers. A player who
+// fetched but came back sparse still has a row, so they aren't re-requested.
+func missingPUUIDs(have map[string]riot.PlayerStats, want []string) []string {
+	var miss []string
+	for _, p := range want {
+		if p == "" {
+			continue
+		}
+		if _, ok := have[p]; !ok {
+			miss = append(miss, p)
+		}
+	}
+	return miss
 }
 
 // attachStats fills each slot's Name + Stats from a (possibly empty) stats map.
