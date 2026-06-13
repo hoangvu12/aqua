@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"aead.dev/minisign"
 	"github.com/minio/selfupdate"
@@ -63,20 +62,5 @@ func TestCompare(t *testing.T) {
 		if got := Compare(c.a, c.b); got != c.want {
 			t.Errorf("Compare(%q,%q) = %d, want %d", c.a, c.b, got, c.want)
 		}
-	}
-}
-
-func TestDueForCheck(t *testing.T) {
-	dir := t.TempDir()
-	now := time.Unix(1_700_000_000, 0)
-	if !DueForCheck(dir, 24*time.Hour, now) {
-		t.Fatal("first run should be due")
-	}
-	RecordCheck(dir, "", now)
-	if DueForCheck(dir, 24*time.Hour, now.Add(time.Hour)) {
-		t.Fatal("should not be due an hour later")
-	}
-	if !DueForCheck(dir, 24*time.Hour, now.Add(25*time.Hour)) {
-		t.Fatal("should be due after the interval")
 	}
 }

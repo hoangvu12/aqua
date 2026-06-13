@@ -92,6 +92,20 @@ func main() {
 	// delete it while it was the running image).
 	updater.CleanupOldBinary()
 
+	// Auto-update on launch (interactive runs only): if a newer signed release
+	// exists, install it and relaunch into it before doing anything else, so an
+	// old aqua.exe transparently becomes the latest. If it can't install, we
+	// remember the version to show a banner once the UI is up.
+	var pendingUpdate string
+	var pendingMandatory bool
+	if !*headless {
+		if relaunched, failVer, mand := autoUpdate(); relaunched {
+			return
+		} else {
+			pendingUpdate, pendingMandatory = failVer, mand
+		}
+	}
+
 	// In UI mode the UI owns the terminal, so logs go to a file. In headless
 	// mode keep the original stderr logging (PAIRCODE=… is parseable there).
 	if !*headless {
@@ -252,8 +266,11 @@ func main() {
 
 	go pk.Run(ctx)
 
-	// Throttled, non-blocking check that lights up the UI's update banner.
-	startUpdateCheck(ctx, u)
+	// Surface an update we found but couldn't auto-install (rare: permissions,
+	// locked file). The happy path already relaunched into the new version.
+	if u != nil && pendingUpdate != "" {
+		u.SetUpdateAvailable(pendingUpdate, pendingMandatory)
+	}
 
 	if u != nil {
 		u.Run(ctx) // owns the terminal; returns when ctx is cancelled / user quits

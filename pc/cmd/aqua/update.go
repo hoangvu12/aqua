@@ -4,17 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"time"
 
-	"aqua/internal/config"
-	"aqua/internal/ui"
 	"aqua/internal/updater"
 	"aqua/internal/version"
 )
-
-// updateCheckEvery throttles the background startup check so we hit the network
-// at most once a day per machine.
-const updateCheckEvery = 24 * time.Hour
 
 // runUpdate is the `-update` mode: check the manifest and, if a newer build is
 // offered, download/verify/install it over the running aqua.exe. It owns stdout
@@ -47,34 +42,46 @@ func runUpdate() int {
 	return 0
 }
 
-// startUpdateCheck runs a throttled background check and, if a newer build is
-// offered, lights up the UI banner. Non-fatal: any error is silently ignored,
-// since the app works fine without updating. No-op in headless mode (u == nil)
-// or when AQUA_NO_UPDATE_CHECK is set.
-func startUpdateCheck(ctx context.Context, u *ui.UI) {
-	if u == nil || os.Getenv("AQUA_NO_UPDATE_CHECK") != "" {
-		return
+// autoUpdate is the on-launch update step for interactive runs. It checks for a
+// newer signed release and, if one exists, installs it and relaunches into the
+// new binary in the same console — so opening an old aqua.exe transparently
+// becomes the latest. Returns relaunched=true when a replacement process has
+// been started and the caller should exit. If an update exists but can't be
+// installed, it returns the offered version so the UI can show a banner
+// pointing at `aqua.exe -update`. Disabled with AQUA_NO_UPDATE_CHECK; silent
+// when offline or already current.
+func autoUpdate() (relaunched bool, failedVersion string, mandatory bool) {
+	if os.Getenv("AQUA_NO_UPDATE_CHECK") != "" {
+		return false, "", false
 	}
-	go func() {
-		dir, err := config.Dir()
-		if err != nil {
-			return
+
+	// Short timeout so an offline launch isn't held up for long.
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	av, err := updater.Check(ctx)
+	if err != nil || av == nil {
+		return false, "", false // offline or already up to date — just start
+	}
+
+	fmt.Printf("Aqua: new version %s available — updating from %s…\n", av.Manifest.Version, version.Version)
+	ictx, icancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer icancel()
+	if err := updater.Apply(ictx, av.Manifest); err != nil {
+		fmt.Fprintf(os.Stderr, "Aqua: auto-update failed (%v); staying on %s\n", err, version.Version)
+		return false, av.Manifest.Version, av.Mandatory
+	}
+
+	// Installed. Relaunch into the new binary (same path, now replaced).
+	if exe, err := os.Executable(); err == nil {
+		fmt.Printf("Aqua: updated to %s — restarting…\n", av.Manifest.Version)
+		cmd := exec.Command(exe, os.Args[1:]...)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		if err := cmd.Start(); err == nil {
+			return true, "", false
 		}
-		now := time.Now()
-		if !updater.DueForCheck(dir, updateCheckEvery, now) {
-			return
-		}
-		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		defer cancel()
-		av, err := updater.Check(cctx)
-		if err != nil {
-			return // offline / GitHub unreachable — try again next launch
-		}
-		latest := ""
-		if av != nil {
-			latest = av.Manifest.Version
-			u.SetUpdateAvailable(av.Manifest.Version, av.Mandatory)
-		}
-		updater.RecordCheck(dir, latest, now)
-	}()
+	}
+	// Couldn't relaunch: the on-disk binary is already updated, so keep running
+	// this (still-loaded) version for now; the next launch is the new one.
+	fmt.Printf("Aqua: updated to %s — it will take effect next launch.\n", av.Manifest.Version)
+	return false, "", false
 }
