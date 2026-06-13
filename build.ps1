@@ -30,8 +30,15 @@ try {
         Write-Warning "icon embed skipped (goversioninfo unavailable): $($_.Exception.Message)"
     }
 
+    # Version stamped into the binary (read by the auto-updater). Locally we
+    # derive it from git tags; un-tagged builds report "dev", which the updater
+    # treats as older than any release. CI overrides this with the release tag.
+    $version = (git describe --tags --dirty 2>$null)
+    if (-not $version) { $version = "dev" }
+    Write-Host "    version $version" -ForegroundColor DarkGray
+
     # Console app: do NOT pass -H windowsgui — the UI needs a terminal.
-    go build -o "$root/Aqua.exe" ./cmd/aqua
+    go build -ldflags "-X aqua/internal/version.Version=$version" -o "$root/Aqua.exe" ./cmd/aqua
     Remove-Item $syso -ErrorAction SilentlyContinue
 } finally { Pop-Location }
 

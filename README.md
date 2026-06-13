@@ -16,7 +16,8 @@ PC: Aqua.exe (Go)            Cloudflare (aqua.nguyenvu.dev)        Phone (PWA)
 > The read-only parts are low risk; the lock is not. Use at your own risk.
 
 ## Layout
-- `pc/` — Go app → single static `Aqua.exe` (`internal/{config,riot,picker,relay,ui}`, `cmd/aqua`).
+- `pc/` — Go app → single static `Aqua.exe` (`internal/{config,riot,picker,relay,ui,updater,version}`,
+  `cmd/aqua`; `cmd/aquasign` is the maintainer-only release signing tool).
 - `cloud/aqua-agent-picker-worker/` — TypeScript Worker + `RelayRoom` Durable Object; also
   mirrors the valorant-api catalog/art at `/api` and `/cdn`.
 - `web/` — Vite + React + Tailwind + shadcn SPA (build → `web/dist`, served by the Worker).
@@ -48,6 +49,29 @@ bun run deploy        # publishes the Worker + web/dist, binds aqua.nguyenvu.dev
 
 `wrangler` must be logged in and `nguyenvu.dev` must be a zone in your Cloudflare account.
 
+## Cut a release (auto-update)
+
+Releases are built and signed by `.github/workflows/release.yml`. Tag and push:
+
+```powershell
+git tag v1.1.0; git push origin v1.1.0    # or run the "release" workflow manually
+```
+
+CI builds `Aqua.exe` with the version stamped in, signs it (minisign), generates
+`manifest-windows-amd64.json`, and publishes all three as the GitHub Release. Clients pick it up
+on their next daily check. Pass a `min_version` (manual run) to mark older clients as needing a
+mandatory update — useful when a relay-protocol change makes stale binaries incompatible.
+
+**One-time signing setup.** Generate the keypair, embed the public key, and add the secrets:
+
+```powershell
+cd pc; go run ./cmd/aquasign keygen     # prints the public key + the two secret values
+```
+
+Put the printed key in `pc/internal/version/version.go` (`PublicKey`) and add
+`AQUA_SIGNING_KEY` + `AQUA_SIGNING_PASSWORD` as GitHub repo secrets. Keep the private key file
+offline; it is gitignored under `dist/`.
+
 ## Run
 
 1. Start `Aqua.exe` on your PC. The console shows a **pairing QR**, the pair URL, and an
@@ -67,6 +91,21 @@ bun run deploy        # publishes the Worker + web/dist, binds aqua.nguyenvu.dev
 Run `Aqua.exe -headless` to skip the console UI and log to stderr (used by the integration
 tests / scripted pairing). Config lives at `%APPDATA%\Aqua\config.json`; logs at
 `%APPDATA%\Aqua\aqua.log`.
+
+## Updating
+
+Only `Aqua.exe` self-updates — the phone SPA and the relay Worker are server-side and refresh
+on their own. On launch Aqua checks (at most once a day) for a newer signed release and, if one
+exists, shows an **Update available** banner. To install it, quit and run:
+
+```powershell
+Aqua.exe -update    # downloads, verifies signature + checksum, replaces itself in place
+Aqua.exe -version   # print the running version
+```
+
+The update is fetched straight from the latest GitHub Release and verified against a minisign
+public key baked into the binary, so a tampered download is refused. Set `AQUA_NO_UPDATE_CHECK=1`
+to silence the startup check, or `AQUA_MANIFEST_URL` to point at a staging release.
 
 ## Develop
 

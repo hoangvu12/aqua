@@ -27,6 +27,8 @@ import (
 	"aqua/internal/picker"
 	"aqua/internal/relay"
 	"aqua/internal/ui"
+	"aqua/internal/updater"
+	"aqua/internal/version"
 )
 
 // connSink emits picker frames to whichever relay connection is currently live,
@@ -56,18 +58,39 @@ func (s *connSink) SendAuthStatus(ok bool, message string) {
 
 func main() {
 	var (
-		workerFlag = flag.String("worker", "", "override relay base URL (ws/wss); default from config")
-		sim        = flag.Bool("sim", false, "use the simulated game source (no live VALORANT)")
-		mint       = flag.Bool("mint", true, "mint a pair code after relay auth")
-		ttl        = flag.Int("ttl", 300, "pair-code TTL in seconds (1..600)")
-		headless   = flag.Bool("headless", false, "no console UI; log to stderr (for tests/scripting)")
+		workerFlag  = flag.String("worker", "", "override relay base URL (ws/wss); default from config")
+		sim         = flag.Bool("sim", false, "use the simulated game source (no live VALORANT)")
+		mint        = flag.Bool("mint", true, "mint a pair code after relay auth")
+		ttl         = flag.Int("ttl", 300, "pair-code TTL in seconds (1..600)")
+		headless    = flag.Bool("headless", false, "no console UI; log to stderr (for tests/scripting)")
+		showVersion = flag.Bool("version", false, "print the Aqua version and exit")
+		doUpdate    = flag.Bool("update", false, "check for and install a newer Aqua.exe, then exit")
 	)
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("Aqua", version.Version)
+		return
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+
+	workerURL := cfg.WorkerURL
+	if *workerFlag != "" {
+		workerURL = *workerFlag
+	}
+
+	// -update runs as its own short-lived mode (no UI / relay), then exits.
+	if *doUpdate {
+		os.Exit(runUpdate())
+	}
+
+	// Sweep any <exe>.old left by a previous in-place update (Windows couldn't
+	// delete it while it was the running image).
+	updater.CleanupOldBinary()
 
 	// In UI mode the UI owns the terminal, so logs go to a file. In headless
 	// mode keep the original stderr logging (PAIRCODE=… is parseable there).
@@ -80,10 +103,6 @@ func main() {
 		}
 	}
 
-	workerURL := cfg.WorkerURL
-	if *workerFlag != "" {
-		workerURL = *workerFlag
-	}
 	agentURL := fmt.Sprintf("%s/agent?role=pc&device=%s", workerURL, cfg.DeviceID)
 
 	var src picker.Source
@@ -232,6 +251,9 @@ func main() {
 	}
 
 	go pk.Run(ctx)
+
+	// Throttled, non-blocking check that lights up the UI's update banner.
+	startUpdateCheck(ctx, u)
 
 	if u != nil {
 		u.Run(ctx) // owns the terminal; returns when ctx is cancelled / user quits

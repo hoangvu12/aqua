@@ -1,6 +1,9 @@
 # Go
 /Aqua.exe
 /pc/Aqua.exe
+
+# Release signing private key + build artifacts (NEVER commit the key)
+/dist/
 # Generated Windows resource (icon/version info), produced by build.ps1
 /pc/cmd/aqua/*.syso
 

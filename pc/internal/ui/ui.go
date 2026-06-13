@@ -45,6 +45,9 @@ type Model struct {
 
 	Notice    string // transient toast (e.g. "all phones unpaired")
 	noticeGen int
+
+	UpdateVersion   string // non-empty when a newer Aqua.exe is available
+	UpdateMandatory bool   // running build is below the manifest's min_version
 }
 
 // UI renders Model to the terminal and dispatches keypresses to Actions.
@@ -87,6 +90,12 @@ func (u *UI) act() Actions {
 func (u *UI) SetRemoteEnabled(b bool) { u.set(func(m *Model) { m.RemoteEnabled = b }) }
 func (u *UI) SetRelay(status string)  { u.set(func(m *Model) { m.Relay = status }) }
 func (u *UI) SetGameState(s string)   { u.set(func(m *Model) { m.GameState = s }) }
+
+// SetUpdateAvailable surfaces a persistent banner advertising a newer Aqua.exe.
+// Pass an empty version to clear it.
+func (u *UI) SetUpdateAvailable(version string, mandatory bool) {
+	u.set(func(m *Model) { m.UpdateVersion, m.UpdateMandatory = version, mandatory })
+}
 
 // SetPairCode records a freshly minted code + the URL the phone opens, and
 // pre-renders its QR. Clears when code is empty.
@@ -229,6 +238,16 @@ func (u *UI) render() {
 
 	line(&b, cBold+cAccent+"  AQUA"+cReset+cDim+"  ·  Remote VALORANT Agent Picker"+cReset)
 	line(&b, "")
+
+	if m.UpdateVersion != "" {
+		label := "Update available"
+		if m.UpdateMandatory {
+			label = "Required update"
+		}
+		line(&b, "  "+cAccent+"▲ "+label+": "+cBold+m.UpdateVersion+cReset+
+			cDim+"   quit and run "+cReset+cBold+"Aqua.exe -update"+cReset)
+		line(&b, "")
+	}
 
 	if !m.RemoteEnabled {
 		line(&b, "  "+cYellow+"Remote control is OFF"+cReset)
