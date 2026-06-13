@@ -8,6 +8,7 @@
 package riot
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -201,6 +202,55 @@ func (c *Client) InCoreGame(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
+// CoreGamePlayer returns the player's live match id (ErrNotFound → not in a
+// running match). Unlike InCoreGame it hands back the id needed for the roster.
+func (c *Client) CoreGamePlayer(ctx context.Context) (string, error) {
+	var r struct {
+		MatchID string `json:"MatchID"`
+	}
+	if err := c.glz(ctx, "GET", c.glzURL("/core-game/v1/players/"+c.auth.PUUID), &r); err != nil {
+		return "", err
+	}
+	return r.MatchID, nil
+}
+
+// CoreGameSeat is one player in a live match. Unlike pregame, core-game exposes
+// BOTH teams, so this is the source for the enemy roster (the scoreboard).
+type CoreGameSeat struct {
+	Subject     string
+	TeamID      string // "Blue" | "Red"
+	CharacterID string
+	Incognito   bool // streamer mode — honor by redacting name/level
+}
+
+// CoreGameMatch returns every player in a live match (both teams). Undocumented
+// and patch-fragile → parse defensively; callers degrade gracefully.
+func (c *Client) CoreGameMatch(ctx context.Context, matchID string) ([]CoreGameSeat, error) {
+	var r struct {
+		Players []struct {
+			Subject        string `json:"Subject"`
+			TeamID         string `json:"TeamID"`
+			CharacterID    string `json:"CharacterID"`
+			PlayerIdentity struct {
+				Incognito bool `json:"Incognito"`
+			} `json:"PlayerIdentity"`
+		} `json:"Players"`
+	}
+	if err := c.glz(ctx, "GET", c.glzURL("/core-game/v1/matches/"+matchID), &r); err != nil {
+		return nil, err
+	}
+	out := make([]CoreGameSeat, 0, len(r.Players))
+	for _, p := range r.Players {
+		out = append(out, CoreGameSeat{
+			Subject:     p.Subject,
+			TeamID:      p.TeamID,
+			CharacterID: p.CharacterID,
+			Incognito:   p.PlayerIdentity.Incognito,
+		})
+	}
+	return out, nil
+}
+
 // Select sets (but does not lock) the agent for the match.
 func (c *Client) Select(ctx context.Context, matchID, agentID string) error {
 	return c.glz(ctx, "POST", c.glzURL("/pregame/v1/matches/"+matchID+"/select/"+agentID), nil)
@@ -235,6 +285,12 @@ func (c *Client) glzURL(path string) string {
 	return "https://" + c.auth.Endpoints.GLZHost() + path
 }
 
+// pdURL builds a player-data (pd.{shard}.a.pvp.net) URL — MMR, match history,
+// match details, name-service all live here (vs the live-session GLZ host).
+func (c *Client) pdURL(path string) string {
+	return "https://" + c.auth.Endpoints.PDHost() + path
+}
+
 func (c *Client) localGet(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://127.0.0.1:"+c.port+path, nil)
 	if err != nil {
@@ -246,7 +302,20 @@ func (c *Client) localGet(ctx context.Context, path string, out any) error {
 
 // glz issues an authenticated GLZ/PD request, decoding into out (nil to discard).
 func (c *Client) glz(ctx context.Context, method, url string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+	return c.glzBody(ctx, method, url, nil, out)
+}
+
+// glzBody is glz with an optional JSON request body (name-service is a PUT).
+func (c *Client) glzBody(ctx context.Context, method, url string, body, out any) error {
+	var rdr io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		rdr = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, rdr)
 	if err != nil {
 		return err
 	}
@@ -254,6 +323,9 @@ func (c *Client) glz(ctx context.Context, method, url string, out any) error {
 	req.Header.Set("X-Riot-Entitlements-JWT", c.auth.EntitlementToken)
 	req.Header.Set("X-Riot-ClientPlatform", platformHeaderB64)
 	req.Header.Set("X-Riot-ClientVersion", c.clientVersion)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	return do(c.remote, req, out)
 }
 

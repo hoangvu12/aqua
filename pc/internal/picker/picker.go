@@ -154,6 +154,7 @@ func (p *Picker) build(snap Snapshot, err error) State {
 		OwnedAgentUUIDs:  orEmpty(snap.OwnedAgents),
 		TakenAgentUUIDs:  []string{},
 		Teammates:        []Teammate{},
+		MatchPlayers:     []MatchSeat{},
 		PrepickStatus:    "none",
 		GameLocale:       snap.Locale,
 	}
@@ -169,6 +170,16 @@ func (p *Picker) build(snap Snapshot, err error) State {
 	switch snap.Phase {
 	case "ingame":
 		st.State = "ingame"
+		puuid := p.src.PUUID()
+		for _, pl := range snap.Players {
+			st.MatchPlayers = append(st.MatchPlayers, MatchSeat{
+				Name:      pl.Name,
+				AgentUUID: pl.CharacterID,
+				Team:      pl.Team,
+				Self:      pl.PUUID == puuid,
+				Stats:     pl.Stats,
+			})
+		}
 	case "pregame":
 		st.MatchID = snap.MatchID
 		st.MapID = snap.MapID
@@ -185,6 +196,7 @@ func (p *Picker) build(snap Snapshot, err error) State {
 				AgentUUID: pl.CharacterID,
 				Status:    pl.SelectionState,
 				Self:      self,
+				Stats:     pl.Stats,
 			})
 			if self {
 				ourState, ourAgent = pl.SelectionState, pl.CharacterID

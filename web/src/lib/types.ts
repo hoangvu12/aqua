@@ -16,6 +16,24 @@ export type GameState =
 /** Pre-pick lifecycle. `locking` is optimistic; `locked`/`taken` are game-derived. */
 export type PrepickStatus = "none" | "armed" | "locking" | "locked" | "taken";
 
+/** Tracker row for one player: identity, rank, and recent-form aggregates.
+ * Mirrors riot.PlayerStats (pc/internal/riot/stats.go). Absent until the PC's
+ * background fetch resolves it. */
+export interface PlayerStats {
+  puuid: string;
+  name: string; // "GameName#TagLine"
+  tier: number; // current competitive tier (0 = unranked)
+  rr: number; // ranked rating within the tier
+  peak_tier: number; // highest tier ever won a game at
+  matches: number;
+  wins: number;
+  win_pct: number; // 0..100
+  kd: number;
+  adr: number; // avg damage / round
+  hs_pct: number; // 0..100
+  recent: boolean[]; // newest-first W/L
+}
+
 /** One ally-team seat in agent select. status ∈ ""|selected|locked. `self`
  * marks the local player's own seat so the strip can highlight it. */
 export interface Teammate {
@@ -23,6 +41,16 @@ export interface Teammate {
   agent_uuid: string;
   status: "" | "selected" | "locked";
   self: boolean;
+  stats?: PlayerStats | null;
+}
+
+/** One row in the live-match scoreboard (both teams). */
+export interface MatchSeat {
+  name: string;
+  agent_uuid: string;
+  team: "ally" | "enemy";
+  self: boolean;
+  stats?: PlayerStats | null;
 }
 
 /** The `state` object pushed by the PC. Fields are always present. */
@@ -40,6 +68,8 @@ export interface GameStateMsg {
   prepick_status: PrepickStatus;
   game_locale: string;
   teammates: Teammate[];
+  /** Live-match scoreboard (both teams); populated only in the `ingame` state. */
+  match_players: MatchSeat[];
   /** The local player's own seat (game truth), so the phone reflects picks made
    * on the PC and renders correctly on cold-start. status ∈ ""|selected|locked. */
   self_agent_uuid: string;
@@ -88,9 +118,19 @@ export interface GameMap {
   mapUrl: string; // GLZ MapID path — join key, NOT displayName
 }
 
+/** One competitive rank tier (valorant-api competitivetiers). `tier` is the
+ * join key matched against PlayerStats.tier / peak_tier. */
+export interface CompetitiveTier {
+  tier: number;
+  tierName: string; // e.g. "DIAMOND 2" (localized); "UNRANKED" for 0
+  smallIcon: string | null;
+  largeIcon: string | null;
+}
+
 export interface Catalog {
   version: string;
   language: string;
   agents: Agent[];
   maps: GameMap[];
+  ranks: CompetitiveTier[];
 }

@@ -1,4 +1,4 @@
-import type { Agent, Catalog, GameMap } from "./types";
+import type { Agent, Catalog, CompetitiveTier, GameMap } from "./types";
 
 // In production the Worker mirrors the catalog at same-origin /api (and rewrites
 // embedded art URLs to /cdn) — no third-party hotlink at runtime. In dev there is
@@ -47,6 +47,22 @@ async function fetchMaps(lang: string): Promise<GameMap[]> {
   return (j?.data ?? []) as GameMap[];
 }
 
+/** Competitive tiers from the most recent tier set (the API returns one set per
+ * episode; the last is current). Tier numbers are stable across episodes. */
+async function fetchRanks(lang: string): Promise<CompetitiveTier[]> {
+  const res = await fetch(`${API}/competitivetiers?language=${lang}`);
+  if (!res.ok) throw new Error(`competitivetiers ${res.status}`);
+  const j = await res.json();
+  const sets = (j?.data ?? []) as { tiers?: CompetitiveTier[] }[];
+  const latest = sets[sets.length - 1];
+  return (latest?.tiers ?? []).map((t) => ({
+    tier: t.tier,
+    tierName: t.tierName,
+    smallIcon: t.smallIcon,
+    largeIcon: t.largeIcon,
+  }));
+}
+
 /**
  * Load the agent + map catalog for a locale, served from localStorage when the
  * cached entry matches the current valorant-api version (plan §Assets). On any
@@ -66,11 +82,16 @@ export async function loadCatalog(gameLocale: string | undefined): Promise<Catal
     throw new Error("catalog unavailable (offline, no cache)");
   }
 
-  if (cached && cached.version === version) return cached;
+  // `cached.ranks` guards against an older cached shape (pre-scoreboard).
+  if (cached && cached.version === version && cached.ranks) return cached;
 
   try {
-    const [agents, maps] = await Promise.all([fetchAgents(language), fetchMaps(language)]);
-    const catalog: Catalog = { version, language, agents, maps };
+    const [agents, maps, ranks] = await Promise.all([
+      fetchAgents(language),
+      fetchMaps(language),
+      fetchRanks(language).catch(() => [] as CompetitiveTier[]), // ranks are non-critical
+    ]);
+    const catalog: Catalog = { version, language, agents, maps, ranks };
     try {
       localStorage.setItem(key, JSON.stringify(catalog));
     } catch {
@@ -95,6 +116,14 @@ function safeParse(s: string): Catalog | null {
 
 export function agentByUuid(catalog: Catalog | null, uuid: string): Agent | undefined {
   return catalog?.agents.find((a) => a.uuid === uuid);
+}
+
+/** Resolve a competitive tier number (PlayerStats.tier / peak_tier) to its
+ * rank. Tier 0 resolves to UNRANKED (which has its own emblem); returns
+ * undefined only before the catalog loads or for the unused tiers 1–2. */
+export function rankByTier(catalog: Catalog | null, tier: number): CompetitiveTier | undefined {
+  if (!catalog?.ranks) return undefined;
+  return catalog.ranks.find((r) => r.tier === tier);
 }
 
 /**

@@ -22,6 +22,7 @@ import { AlliesStrip } from "@/components/AlliesStrip";
 import { ActionBar } from "@/components/ActionBar";
 import { Pairing } from "@/components/Pairing";
 import { StateScreen } from "@/components/StateScreen";
+import { Scoreboard } from "@/components/Scoreboard";
 
 const CONTROLLER_STATES = new Set([
   "menus",
@@ -169,6 +170,8 @@ export default function App() {
             onToggleAutoLock={onToggleAutoLock}
           />
         </>
+      ) : game && game.state === "ingame" && game.match_players.length > 0 ? (
+        <Scoreboard players={game.match_players} catalog={catalog} lang={lang} />
       ) : (
         <StateScreen kind={screenKind(game, graceExpired)} lang={lang} />
       )}
