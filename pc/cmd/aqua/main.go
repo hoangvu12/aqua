@@ -64,7 +64,7 @@ func main() {
 		ttl         = flag.Int("ttl", 300, "pair-code TTL in seconds (1..600)")
 		headless    = flag.Bool("headless", false, "no console UI; log to stderr (for tests/scripting)")
 		showVersion = flag.Bool("version", false, "print the Aqua version and exit")
-		doUpdate    = flag.Bool("update", false, "check for and install a newer Aqua.exe, then exit")
+		doUpdate    = flag.Bool("update", false, "check for and install a newer aqua.exe, then exit")
 	)
 	flag.Parse()
 

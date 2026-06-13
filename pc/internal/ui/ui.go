@@ -4,7 +4,7 @@
 // single-key actions (r = toggle remote, u = unpair all phones, q = quit).
 //
 // It is deliberately a plain console UI, not a GUI: that keeps Aqua a single
-// static Aqua.exe with no CGO / C toolchain / GL libraries (Fyne was dropped for
+// static aqua.exe with no CGO / C toolchain / GL libraries (Fyne was dropped for
 // exactly that reason). Rendering is a full-screen redraw on every change via
 // ANSI escapes; key input uses raw mode (golang.org/x/term). Because the UI owns
 // stdout, the rest of the app routes its logs to a file — see cmd/aqua/main.go.
@@ -46,7 +46,7 @@ type Model struct {
 	Notice    string // transient toast (e.g. "all phones unpaired")
 	noticeGen int
 
-	UpdateVersion   string // non-empty when a newer Aqua.exe is available
+	UpdateVersion   string // non-empty when a newer aqua.exe is available
 	UpdateMandatory bool   // running build is below the manifest's min_version
 }
 
@@ -91,7 +91,7 @@ func (u *UI) SetRemoteEnabled(b bool) { u.set(func(m *Model) { m.RemoteEnabled =
 func (u *UI) SetRelay(status string)  { u.set(func(m *Model) { m.Relay = status }) }
 func (u *UI) SetGameState(s string)   { u.set(func(m *Model) { m.GameState = s }) }
 
-// SetUpdateAvailable surfaces a persistent banner advertising a newer Aqua.exe.
+// SetUpdateAvailable surfaces a persistent banner advertising a newer aqua.exe.
 // Pass an empty version to clear it.
 func (u *UI) SetUpdateAvailable(version string, mandatory bool) {
 	u.set(func(m *Model) { m.UpdateVersion, m.UpdateMandatory = version, mandatory })
@@ -236,48 +236,39 @@ func (u *UI) render() {
 	// Home + clear screen + clear scrollback.
 	b.WriteString("\x1b[H\x1b[2J\x1b[3J")
 
-	line(&b, cBold+cAccent+"  AQUA"+cReset+cDim+"  ·  Remote VALORANT Agent Picker"+cReset)
-	line(&b, "")
+	// One header line carries the live status (remote/relay/game) so the whole
+	// UI stays small — no separate status panel, no divider, no blank spacers.
+	status := cDim + "remote " + cReset + remoteBadge(m.RemoteEnabled) +
+		cDim + " · relay " + cReset + relayBadge(m.Relay) +
+		cDim + " · game " + cReset + gameBadge(m.GameState)
+	line(&b, cBold+cAccent+"AQUA"+cReset+"   "+status)
 
 	if m.UpdateVersion != "" {
-		label := "Update available"
+		label := "update"
 		if m.UpdateMandatory {
-			label = "Required update"
+			label = "required update"
 		}
-		line(&b, "  "+cAccent+"▲ "+label+": "+cBold+m.UpdateVersion+cReset+
-			cDim+"   quit and run "+cReset+cBold+"Aqua.exe -update"+cReset)
-		line(&b, "")
+		line(&b, cAccent+"▲ "+label+" "+m.UpdateVersion+cReset+cDim+" — run "+cReset+cBold+"aqua.exe -update"+cReset)
 	}
 
-	if !m.RemoteEnabled {
-		line(&b, "  "+cYellow+"Remote control is OFF"+cReset)
-		line(&b, "  "+cDim+"Press "+cReset+cBold+"r"+cReset+cDim+" to enable remote control from your phone."+cReset)
-	} else if m.PairCode == "" {
-		line(&b, "  "+cDim+"Connecting to relay and minting a pair code…"+cReset)
-	} else {
-		// QR block (already ANSI half-blocks), indented two spaces per line.
+	switch {
+	case !m.RemoteEnabled:
+		line(&b, cDim+"Remote control is off. Press "+cReset+cBold+"r"+cReset+cDim+" to control from your phone."+cReset)
+	case m.PairCode == "":
+		line(&b, cDim+"Connecting to relay and minting a pair code…"+cReset)
+	default:
 		for _, ln := range strings.Split(strings.TrimRight(qr, "\n"), "\n") {
-			line(&b, "  "+ln)
+			line(&b, ln)
 		}
-		line(&b, "")
-		line(&b, "  "+cDim+"Scan to pair, or open on your phone:"+cReset)
-		line(&b, "  "+cBold+m.PairURL+cReset)
-		line(&b, "  "+cDim+"Code:"+cReset+"  "+cBold+cAccent+spaceCode(m.PairCode)+cReset+
-			"   "+cDim+expiryHint(m.PairExpires)+cReset)
+		line(&b, cDim+"Scan, or open  "+cReset+m.PairURL)
+		line(&b, cDim+"Code "+cReset+cBold+cAccent+spaceCode(m.PairCode)+cReset+
+			"  "+cDim+expiryHint(m.PairExpires)+cReset)
 	}
 
-	line(&b, "")
-	line(&b, "  "+cDim+strings.Repeat("─", 44)+cReset)
-	line(&b, "  Remote   "+remoteBadge(m.RemoteEnabled))
-	line(&b, "  Relay    "+relayBadge(m.Relay))
-	line(&b, "  Game     "+gameBadge(m.GameState))
 	if m.Notice != "" {
-		line(&b, "")
-		line(&b, "  "+cGreen+"› "+m.Notice+cReset)
+		line(&b, cGreen+"› "+m.Notice+cReset)
 	}
-	line(&b, "")
-	line(&b, "  "+cDim+"["+cReset+"r"+cDim+"] toggle remote   ["+cReset+"u"+cDim+
-		"] unpair phones   ["+cReset+"q"+cDim+"] quit"+cReset)
+	line(&b, cDim+"[r] remote  [u] unpair  [q] quit"+cReset)
 
 	u.out.Write(b.Bytes())
 }
@@ -310,7 +301,7 @@ func relayBadge(s string) string {
 
 func gameBadge(s string) string {
 	if s == "" || s == "offline" {
-		return cDim + "offline" + cReset + cDim + "  (start VALORANT)" + cReset
+		return cDim + "offline" + cReset
 	}
 	if s == "error" {
 		return cRed + "error" + cReset
@@ -341,7 +332,7 @@ func expiryHint(exp time.Time) string {
 func renderQR(text string) string {
 	var buf bytes.Buffer
 	qrterminal.GenerateWithConfig(text, qrterminal.Config{
-		Level:      qrterminal.M,
+		Level:      qrterminal.L, // smallest QR (fine for a close-range phone scan)
 		Writer:     &buf,
 		HalfBlocks: true,
 		BlackChar:  qrterminal.BLACK_BLACK,

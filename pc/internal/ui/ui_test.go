@@ -22,10 +22,10 @@ func TestRenderRemoteOff(t *testing.T) {
 	u := New("dev", Actions{})
 	u.SetRemoteEnabled(false)
 	out := renderTo(u)
-	if !strings.Contains(out, "Remote control is OFF") {
-		t.Fatalf("expected OFF hint, got:\n%s", out)
+	if !strings.Contains(out, "Remote control is off") {
+		t.Fatalf("expected off hint, got:\n%s", out)
 	}
-	if !strings.Contains(out, "Remote   off") {
+	if !strings.Contains(out, "remote off") {
 		t.Fatalf("expected remote badge off, got:\n%s", out)
 	}
 }
@@ -41,10 +41,10 @@ func TestRenderPairScreen(t *testing.T) {
 	out := renderTo(u)
 	for _, want := range []string{
 		"https://aqua.nguyenvu.dev/?code=ABCD2345&device=devbox", // URL
-		"ABCD 2345",         // spaced code
-		"Scan to pair",      // QR caption
-		"Relay    authenticated",
-		"Game     menus",
+		"ABCD 2345", // spaced code
+		"Scan, or open",
+		"relay authenticated", // header status
+		"game menus",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("pair screen missing %q, got:\n%s", want, out)

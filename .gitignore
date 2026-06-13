@@ -1,6 +1,6 @@
 # Go
-/Aqua.exe
-/pc/Aqua.exe
+/aqua.exe
+/pc/aqua.exe
 
 # Release signing private key + build artifacts (NEVER commit the key)
 /dist/

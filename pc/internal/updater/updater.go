@@ -1,4 +1,4 @@
-// Package updater self-updates Aqua.exe. It fetches a small JSON manifest
+// Package updater self-updates aqua.exe. It fetches a small JSON manifest
 // straight from the latest GitHub Release (no API call — the stable
 // releases/latest/download/<asset> redirect, so there's no rate limit and no
 // server of our own in the path). When a newer version is offered it downloads
@@ -157,7 +157,7 @@ func Apply(ctx context.Context, m *Manifest) error {
 
 	if err := selfupdate.Apply(bytes.NewReader(bin), opts); err != nil {
 		if rerr := selfupdate.RollbackError(err); rerr != nil {
-			return fmt.Errorf("update failed AND rollback failed (%v); restore Aqua.exe manually: %w", rerr, err)
+			return fmt.Errorf("update failed AND rollback failed (%v); restore aqua.exe manually: %w", rerr, err)
 		}
 		return fmt.Errorf("install: %w", err)
 	}

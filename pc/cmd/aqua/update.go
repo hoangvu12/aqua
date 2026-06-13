@@ -17,7 +17,7 @@ import (
 const updateCheckEvery = 24 * time.Hour
 
 // runUpdate is the `-update` mode: check the manifest and, if a newer build is
-// offered, download/verify/install it over the running Aqua.exe. It owns stdout
+// offered, download/verify/install it over the running aqua.exe. It owns stdout
 // directly (no console UI) and returns a process exit code.
 func runUpdate() int {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -43,7 +43,7 @@ func runUpdate() int {
 		fmt.Fprintf(os.Stderr, "update failed: %v\n", err)
 		return 1
 	}
-	fmt.Printf("Updated to %s. Restart Aqua.exe to run the new version.\n", m.Version)
+	fmt.Printf("Updated to %s. Restart aqua.exe to run the new version.\n", m.Version)
 	return 0
 }
 

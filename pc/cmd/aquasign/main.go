@@ -6,10 +6,10 @@
 //	    Generate a fresh minisign keypair. Writes the (encrypted) private key
 //	    file and prints the public key to embed + the base64 secret for CI.
 //
-//	aquasign sign  -in Aqua.exe -version v1.2.3 -url <binURL> -sig-url <sigURL>
+//	aquasign sign  -in aqua.exe -version v1.2.3 -url <binURL> -sig-url <sigURL>
 //	               [-key aqua-minisign.key | -key-b64 <b64>] [-password <pw>]
 //	               [-min-version v1.0.0] [-notes-url <url>] [-critical]
-//	               [-out-sig Aqua.exe.minisig] [-out-manifest manifest-windows-amd64.json]
+//	               [-out-sig aqua.exe.minisig] [-out-manifest manifest-windows-amd64.json]
 //	    Sign the binary (minisign) and emit the .minisig + the JSON update
 //	    manifest the Worker serves and the client verifies.
 //
@@ -77,7 +77,7 @@ func keygen(args []string) {
 
 func sign(args []string) {
 	fs := newFlagSet("sign")
-	in := fs.String("in", "Aqua.exe", "binary to sign")
+	in := fs.String("in", "aqua.exe", "binary to sign")
 	keyFile := fs.String("key", "", "encrypted private key file")
 	keyB64 := fs.String("key-b64", envOr("AQUA_SIGNING_KEY", ""), "encrypted private key, base64 (or $AQUA_SIGNING_KEY)")
 	password := fs.String("password", envOr("AQUA_SIGNING_PASSWORD", ""), "private-key password (or $AQUA_SIGNING_PASSWORD)")

@@ -20,10 +20,10 @@ func TestSignVerifyRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bin := []byte("pretend this is Aqua.exe\x00\x01\x02")
+	bin := []byte("pretend this is aqua.exe\x00\x01\x02")
 	sig := minisign.Sign(priv, bin)
 
-	sigPath := filepath.Join(t.TempDir(), "Aqua.exe.minisig")
+	sigPath := filepath.Join(t.TempDir(), "aqua.exe.minisig")
 	if err := os.WriteFile(sigPath, sig, 0o644); err != nil {
 		t.Fatal(err)
 	}

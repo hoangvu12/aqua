@@ -11,7 +11,7 @@ pick or lock a VALORANT agent. The tool must disappear into that one fast action
 ## Product purpose
 
 Pick / lock your VALORANT agent from your phone over the internet, plus an auto-locking
-**pre-pick**. The phone is a remote control for a Go app (`Aqua.exe`) running on the user's
+**pre-pick**. The phone is a remote control for a Go app (`aqua.exe`) running on the user's
 PC, relayed through a Cloudflare Worker at `aqua.nguyenvu.dev`. The game is the single source
 of truth; the phone shows pushed game state and sends intents (`select`, `lock`, config).
 

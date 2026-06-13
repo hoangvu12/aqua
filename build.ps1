@@ -1,5 +1,5 @@
 # Aqua build script (Phase 6 packaging).
-# Builds the phone SPA and the single static Aqua.exe. Run from anywhere:
+# Builds the phone SPA and the single static aqua.exe. Run from anywhere:
 #   powershell -ExecutionPolicy Bypass -File build.ps1
 #
 # Toolchain: Bun (npm breaks here on sharp's postinstall) + Go. Deploying the
@@ -15,7 +15,7 @@ try {
     bun run build   # tsc -b && vite build  ->  web/dist (served by the Worker)
 } finally { Pop-Location }
 
-Write-Host "==> Building Aqua.exe (pc/)" -ForegroundColor Cyan
+Write-Host "==> Building aqua.exe (pc/)" -ForegroundColor Cyan
 Push-Location "$root/pc"
 try {
     # Best-effort Windows icon embed. Any *.syso in the main package is linked
@@ -38,13 +38,13 @@ try {
     Write-Host "    version $version" -ForegroundColor DarkGray
 
     # Console app: do NOT pass -H windowsgui — the UI needs a terminal.
-    go build -ldflags "-X aqua/internal/version.Version=$version" -o "$root/Aqua.exe" ./cmd/aqua
+    go build -ldflags "-X aqua/internal/version.Version=$version" -o "$root/aqua.exe" ./cmd/aqua
     Remove-Item $syso -ErrorAction SilentlyContinue
 } finally { Pop-Location }
 
 Write-Host ""
 Write-Host "==> Done. Built:" -ForegroundColor Green
-Write-Host "      $root/Aqua.exe   (run it, then open VALORANT)"
+Write-Host "      $root/aqua.exe   (run it, then open VALORANT)"
 Write-Host "      $root/web/dist   (SPA bundle, served by the Worker)"
 Write-Host ""
 Write-Host "Deploy the relay + SPA to Cloudflare:" -ForegroundColor Cyan

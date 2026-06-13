@@ -1,4 +1,4 @@
-# Release pipeline for Aqua.exe. Push a tag like `v1.2.0` (or run manually) and
+# Release pipeline for aqua.exe. Push a tag like `v1.2.0` (or run manually) and
 # this builds the Windows binary with the version stamped in, signs it with the
 # minisign key, generates the update manifest the auto-updater reads, and
 # publishes all three as a GitHub Release. The client fetches
@@ -44,7 +44,23 @@ jobs:
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Build Aqua.exe
+      # Embed the Windows icon + version resource. goversioninfo writes a .syso
+      # into the main package, which `go build` then links automatically. Done
+      # in CI too (not just build.ps1) so released binaries carry the logo.
+      - name: Embed icon + version info
+        working-directory: pc
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"; CORE="${TAG#v}"; CORE="${CORE%%-*}"
+          go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.4.1 \
+            -64 -o cmd/aqua/resource_windows.syso \
+            -icon ../brand/favicon/favicon.ico \
+            -ver-major "$(echo "$CORE" | cut -d. -f1)" \
+            -ver-minor "$(echo "$CORE" | cut -d. -f2)" \
+            -ver-patch "$(echo "$CORE" | cut -d. -f3)" \
+            -product-version "$TAG" \
+            cmd/aqua/versioninfo.json
+
+      - name: Build aqua.exe
         working-directory: pc
         env:
           GOOS: windows
@@ -52,7 +68,7 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           go build -ldflags "-X aqua/internal/version.Version=${{ steps.ver.outputs.tag }}" \
-            -o ../Aqua.exe ./cmd/aqua
+            -o ../aqua.exe ./cmd/aqua
 
       - name: Sign + generate manifest
         working-directory: pc
@@ -63,13 +79,13 @@ jobs:
           TAG="${{ steps.ver.outputs.tag }}"
           BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
           go run ./cmd/aquasign sign \
-            -in ../Aqua.exe \
+            -in ../aqua.exe \
             -version "$TAG" \
             -min-version "${{ github.event.inputs.min_version }}" \
-            -url "$BASE/Aqua.exe" \
-            -sig-url "$BASE/Aqua.exe.minisig" \
+            -url "$BASE/aqua.exe" \
+            -sig-url "$BASE/aqua.exe.minisig" \
             -notes-url "https://github.com/${{ github.repository }}/releases/tag/$TAG" \
-            -out-sig ../Aqua.exe.minisig \
+            -out-sig ../aqua.exe.minisig \
             -out-manifest ../manifest-windows-amd64.json
 
       - name: Publish release
@@ -78,6 +94,6 @@ jobs:
         run: |
           TAG="${{ steps.ver.outputs.tag }}"
           gh release create "$TAG" \
-            Aqua.exe Aqua.exe.minisig manifest-windows-amd64.json \
+            aqua.exe aqua.exe.minisig manifest-windows-amd64.json \
             --title "Aqua $TAG" \
             --generate-notes

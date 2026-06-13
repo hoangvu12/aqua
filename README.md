@@ -1,12 +1,12 @@
 # Aqua — Remote VALORANT Agent Picker
 
 Pick and lock your VALORANT agent from your phone, plus an auto-locking **pre-pick**.
-Your phone is a remote control for `Aqua.exe` running on your PC; they talk through a
+Your phone is a remote control for `aqua.exe` running on your PC; they talk through a
 Cloudflare Worker relay at **`aqua.nguyenvu.dev`**. Riot tokens never leave the PC — only
 intents (`select Jett`) and game-derived state cross the relay.
 
 ```
-PC: Aqua.exe (Go)            Cloudflare (aqua.nguyenvu.dev)        Phone (PWA)
+PC: aqua.exe (Go)            Cloudflare (aqua.nguyenvu.dev)        Phone (PWA)
   poll VALORANT ── Riot APIs    ┌──────────────────────┐
   relay client  ───outbound────►│ Worker + RelayRoom DO │◄── wss ── SPA
   console UI: QR + status       │ serves SPA + relays   │   https page load
@@ -16,7 +16,7 @@ PC: Aqua.exe (Go)            Cloudflare (aqua.nguyenvu.dev)        Phone (PWA)
 > The read-only parts are low risk; the lock is not. Use at your own risk.
 
 ## Layout
-- `pc/` — Go app → single static `Aqua.exe` (`internal/{config,riot,picker,relay,ui,updater,version}`,
+- `pc/` — Go app → single static `aqua.exe` (`internal/{config,riot,picker,relay,ui,updater,version}`,
   `cmd/aqua`; `cmd/aquasign` is the maintainer-only release signing tool).
 - `cloud/aqua-agent-picker-worker/` — TypeScript Worker + `RelayRoom` Durable Object; also
   mirrors the valorant-api catalog/art at `/api` and `/cdn`.
@@ -32,12 +32,12 @@ Toolchain is **Bun** (npm breaks here on sharp's postinstall) + **Go 1.25+**.
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-This builds the SPA (`web/dist`) and `Aqua.exe`. The script also best-effort embeds the
+This builds the SPA (`web/dist`) and `aqua.exe`. The script also best-effort embeds the
 Windows icon via `goversioninfo` (skipped cleanly if offline). To build pieces by hand:
 
 ```powershell
 cd web;  bun install; bun run build           # SPA
-cd pc;   go build -o ../Aqua.exe ./cmd/aqua   # console app — NOT -H windowsgui
+cd pc;   go build -o ../aqua.exe ./cmd/aqua   # console app — NOT -H windowsgui
 ```
 
 ## Deploy the relay + SPA
@@ -57,7 +57,7 @@ Releases are built and signed by `.github/workflows/release.yml`. Tag and push:
 git tag v1.1.0; git push origin v1.1.0    # or run the "release" workflow manually
 ```
 
-CI builds `Aqua.exe` with the version stamped in, signs it (minisign), generates
+CI builds `aqua.exe` with the version stamped in, signs it (minisign), generates
 `manifest-windows-amd64.json`, and publishes all three as the GitHub Release. Clients pick it up
 on their next daily check. Pass a `min_version` (manual run) to mark older clients as needing a
 mandatory update — useful when a relay-protocol change makes stale binaries incompatible.
@@ -74,7 +74,7 @@ offline; it is gitignored under `dist/`.
 
 ## Run
 
-1. Start `Aqua.exe` on your PC. The console shows a **pairing QR**, the pair URL, and an
+1. Start `aqua.exe` on your PC. The console shows a **pairing QR**, the pair URL, and an
    8-char code.
 2. On your phone, scan the QR (or open the URL) to pair — the phone stores a token and can
    reconnect later without re-pairing. Optionally Add to Home Screen (it's a PWA).
@@ -88,19 +88,19 @@ offline; it is gitignored under `dist/`.
 | `u` | unpair all phones (clears tokens, kicks connected phones) |
 | `q` | quit (Ctrl-C also works) |
 
-Run `Aqua.exe -headless` to skip the console UI and log to stderr (used by the integration
+Run `aqua.exe -headless` to skip the console UI and log to stderr (used by the integration
 tests / scripted pairing). Config lives at `%APPDATA%\Aqua\config.json`; logs at
 `%APPDATA%\Aqua\aqua.log`.
 
 ## Updating
 
-Only `Aqua.exe` self-updates — the phone SPA and the relay Worker are server-side and refresh
+Only `aqua.exe` self-updates — the phone SPA and the relay Worker are server-side and refresh
 on their own. On launch Aqua checks (at most once a day) for a newer signed release and, if one
 exists, shows an **Update available** banner. To install it, quit and run:
 
 ```powershell
-Aqua.exe -update    # downloads, verifies signature + checksum, replaces itself in place
-Aqua.exe -version   # print the running version
+aqua.exe -update    # downloads, verifies signature + checksum, replaces itself in place
+aqua.exe -version   # print the running version
 ```
 
 The update is fetched straight from the latest GitHub Release and verified against a minisign

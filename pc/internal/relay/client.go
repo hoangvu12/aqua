@@ -1,4 +1,4 @@
-// Package relay is the outbound WebSocket client that connects Aqua.exe to the
+// Package relay is the outbound WebSocket client that connects aqua.exe to the
 // Cloudflare relay. The PC always dials out, so nothing is exposed at home.
 //
 // It speaks the JSON envelope protocol ({type, reqId?, data}) and exposes two
