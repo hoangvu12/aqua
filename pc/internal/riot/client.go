@@ -24,6 +24,18 @@ import (
 // Agent items in the store entitlements live under this ItemTypeID.
 const agentItemTypeID = "01bb38e1-da47-4e6a-9b3d-945fe4655707"
 
+// defaultAgentIDs are the free starter agents every account can play. The store
+// entitlements endpoint only lists *acquired* agents, so these five never appear
+// there — we union them in so the phone doesn't show them as locked/not-owned.
+// Brimstone, Jett, Phoenix, Sage, Sova.
+var defaultAgentIDs = []string{
+	"9f0d8ba9-4140-b941-57d3-a7ad57c6b417", // Brimstone
+	"add6443a-41bd-e414-f6ad-e58d267f4e95", // Jett
+	"eb93336a-449b-9c1b-0a54-a891f7921d69", // Phoenix
+	"569fdd95-4d10-43ab-ca70-79becc718b46", // Sage
+	"320b2a48-4d9b-a075-30f1-1f93a9b638fa", // Sova
+}
+
 const fallbackClientVersion = "release-09.00-shipping-0-0000000"
 
 // X-Riot-ClientPlatform is a fixed base64 blob describing a Windows PC client.
@@ -261,7 +273,9 @@ func (c *Client) Lock(ctx context.Context, matchID, agentID string) error {
 	return c.glz(ctx, "POST", c.glzURL("/pregame/v1/matches/"+matchID+"/lock/"+agentID), nil)
 }
 
-// OwnedAgents returns the UUIDs of agents the player owns (store entitlements).
+// OwnedAgents returns the UUIDs of agents the player can play: the free starter
+// agents (always available) unioned with the store entitlements (acquired ones).
+// The entitlements endpoint omits the defaults, so they're added explicitly.
 func (c *Client) OwnedAgents(ctx context.Context) ([]string, error) {
 	url := "https://" + c.auth.Endpoints.PDHost() + "/store/v1/entitlements/" + c.auth.PUUID + "/" + agentItemTypeID
 	var r struct {
@@ -272,9 +286,19 @@ func (c *Client) OwnedAgents(ctx context.Context) ([]string, error) {
 	if err := c.glz(ctx, "GET", url, &r); err != nil {
 		return nil, err
 	}
-	owned := make([]string, 0, len(r.Entitlements))
+	owned := make([]string, 0, len(defaultAgentIDs)+len(r.Entitlements))
+	seen := make(map[string]bool, len(defaultAgentIDs)+len(r.Entitlements))
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			owned = append(owned, id)
+		}
+	}
+	for _, id := range defaultAgentIDs {
+		add(id)
+	}
 	for _, e := range r.Entitlements {
-		owned = append(owned, e.ItemID)
+		add(e.ItemID)
 	}
 	return owned, nil
 }
