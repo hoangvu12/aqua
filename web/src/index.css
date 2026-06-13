@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+/* ── Aqua design tokens (DESIGN.md / plan §Phone UI) ──────────────────────────
+   Committed strategy: tinted near-black neutrals + one VALORANT-red accent.
+   Real agent/map art carries the rest of the color. Every neutral tints to hue 270. */
+@theme {
+  --color-bg: oklch(0.16 0.01 270);
+  --color-surface: oklch(0.2 0.011 270);
+  --color-surface-hi: oklch(0.24 0.011 270);
+  --color-hairline: oklch(0.32 0.012 270);
+
+  --color-fg: oklch(0.97 0.005 270);
+  --color-fg-dim: oklch(0.72 0.01 270);
+  --color-fg-mute: oklch(0.55 0.01 270);
+
+  --color-accent: oklch(0.63 0.22 18);
+  --color-accent-hi: oklch(0.69 0.22 18);
+  --color-ok: oklch(0.72 0.14 150);
+  --color-warn: oklch(0.78 0.14 75);
+
+  /* Text/marks on saturated accent fills. Tinted near-white, never #fff. */
+  --color-on-accent: oklch(0.98 0.015 18);
+
+  --radius-tile: 12px;
+  --radius-card: 16px;
+
+  --font-sans:
+    Inter, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  /* ease-out-quart — the only easing we use (no bounce/elastic). */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-hairline);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* App feel: no rubber-band scroll, no text selection, no tap highlight. */
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  /* Honour the notch / home indicator on installed PWAs. */
+  #root {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* Uppercase tracked label — the game-select register, used sparingly. */
+  .label {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+}

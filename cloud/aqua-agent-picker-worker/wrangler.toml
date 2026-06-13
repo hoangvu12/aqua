@@ -1,0 +1,25 @@
+name = "aqua-agent-picker"
+main = "src/worker.ts"
+compatibility_date = "2025-01-01"
+
+# Custom domain — Cloudflare provisions the DNS record + cert on deploy. (Must be
+# a top-level key, i.e. before any [table] header, or TOML nests it under one.)
+routes = [{ pattern = "aqua.nguyenvu.dev", custom_domain = true }]
+# Keep the *.workers.dev URL alive too (reachability fallback if the custom
+# domain is blocked) — adding a custom route otherwise disables it.
+workers_dev = true
+
+# Static SPA assets. Phase 0 ships a hand-written test page in web/dist;
+# Phase 3 replaces it with the Vite build output.
+[assets]
+directory = "../../web/dist"
+binding = "ASSETS"
+run_worker_first = true                 # Worker owns /agent (and later /pair) before assets
+not_found_handling = "single-page-application"
+
+[durable_objects]
+bindings = [{ name = "RELAY_ROOM", class_name = "RelayRoom" }]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayRoom"]      # SQLite-backed (required on the free tier)

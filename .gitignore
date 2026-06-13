@@ -1,0 +1,24 @@
+# Go
+/Aqua.exe
+/pc/Aqua.exe
+# Generated Windows resource (icon/version info), produced by build.ps1
+/pc/cmd/aqua/*.syso
+
+# Node / Bun
+node_modules/
+.wrangler/
+dist-worker/
+
+# Wrangler generated types (regenerate with `bun run types`)
+cloud/aqua-agent-picker-worker/worker-configuration.d.ts
+
+# Internal planning doc — kept local, not published
+/REMOTE_AGENT_PICKER_PLAN.md
+
+# Build output / TS build cache (regenerate with `bun run build`)
+web/dist/
+*.tsbuildinfo
+
+# OS
+Thumbs.db
+.DS_Store
