@@ -218,6 +218,49 @@ func TestLockReconcile(t *testing.T) {
 	}
 }
 
+// TestDisarmOnMatchEnd: an armed pre-pick clears once the match ends (in-match →
+// menus), so it doesn't auto-arm the next match. A transient offline mid-match
+// must NOT disarm (it could be a socket blip with the game still up).
+func TestDisarmOnMatchEnd(t *testing.T) {
+	t.Setenv("APPDATA", t.TempDir()) // isolate config.Save() from the real config
+
+	cfg := &config.Config{Enabled: true, AutoLock: true, PrepickAgentUUID: tJett}
+	src := &fakeSource{puuid: "self", snap: Snapshot{
+		Running: true, Phase: "ingame", MatchID: "m1",
+		Players: []PlayerSlot{{PUUID: "self", CharacterID: tJett}},
+	}}
+	p, sink := newPicker(cfg, src)
+
+	p.poll(context.Background()) // in match → arm preserved
+	if cfg.PrepickAgentUUID != tJett {
+		t.Fatalf("arm cleared mid-match: prepick = %q, want %s", cfg.PrepickAgentUUID, tJett)
+	}
+
+	// Transient offline mid-match must not disarm.
+	src.snap = Snapshot{Running: false}
+	p.poll(context.Background())
+	if cfg.PrepickAgentUUID != tJett {
+		t.Fatalf("disarmed on transient offline: prepick = %q, want %s", cfg.PrepickAgentUUID, tJett)
+	}
+
+	// Back to an in-match phase, then a clean return to menus → disarm.
+	src.snap = Snapshot{Running: true, Phase: "ingame", MatchID: "m1",
+		Players: []PlayerSlot{{PUUID: "self", CharacterID: tJett}}}
+	p.poll(context.Background())
+	src.snap = Snapshot{Running: true, Phase: "menus"}
+	p.poll(context.Background())
+
+	if cfg.PrepickAgentUUID != "" {
+		t.Errorf("after match end: prepick = %q, want cleared", cfg.PrepickAgentUUID)
+	}
+	if cfg.AutoLock != true {
+		t.Errorf("auto-lock toggle changed on disarm: got %v, want true (persistent preference)", cfg.AutoLock)
+	}
+	if got := sink.last().PrepickStatus; got != "none" {
+		t.Errorf("after disarm: status = %q, want none", got)
+	}
+}
+
 // buildState invokes the picker's state derivation under its lock, mirroring poll.
 func buildState(p *Picker, snap Snapshot) State {
 	p.mu.Lock()

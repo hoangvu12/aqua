@@ -136,6 +136,7 @@ func (p *Picker) poll(ctx context.Context) {
 		log.Printf("picker: snapshot error: %v", err)
 	}
 	p.mu.Lock()
+	p.disarmOnMatchEnd(snap, err)
 	st := p.build(snap, err)
 	changed := !p.hasLast || !reflect.DeepEqual(st, p.last)
 	p.last, p.hasLast = st, true
@@ -148,6 +149,41 @@ func (p *Picker) poll(ctx context.Context) {
 	}
 	if fire {
 		go p.doAutoLock(ctx, mid, agent)
+	}
+}
+
+// inMatch reports whether a wire state is one of the in-match phases (agent
+// select through the live game). Used to detect the match-end edge.
+func inMatch(state string) bool {
+	return state == "pregame" || state == "locked" || state == "ingame"
+}
+
+// disarmOnMatchEnd clears the armed pre-pick once, on the transition from an
+// in-match phase back to a pre-match menu/lobby screen, so an arm is one-shot:
+// it never carries into the next match (the user re-arms each game). The
+// auto-lock toggle is a persistent preference and is left untouched. Caller
+// must hold p.mu. Restricted to a clean return to the menus (not offline/error)
+// so a transient socket blip mid-game can't wipe a still-valid arm.
+func (p *Picker) disarmOnMatchEnd(snap Snapshot, err error) {
+	if !p.hasLast || !inMatch(p.last.State) {
+		return // wasn't in a match → no match-end edge to act on
+	}
+	if err != nil || !snap.Running {
+		return // offline/error could be transient; keep the arm
+	}
+	switch snap.Phase {
+	case "menus", "lobby", "queue", "matchfound", "":
+		// back at a pre-match screen → the match (or dodge) is over
+	default:
+		return // still pregame/ingame → not yet a match-end edge
+	}
+	if p.cfg.PrepickAgentUUID == "" {
+		return // nothing armed
+	}
+	log.Printf("picker: match ended; disarming pre-pick %s", p.cfg.PrepickAgentUUID)
+	p.cfg.PrepickAgentUUID = ""
+	if e := p.cfg.Save(); e != nil {
+		log.Printf("picker: save after disarm: %v", e)
 	}
 }
 
