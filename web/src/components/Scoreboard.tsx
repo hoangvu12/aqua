@@ -193,7 +193,7 @@ function Streak({ recent }: { recent: boolean[] }) {
   return (
     <div className="flex gap-0.5">
       {r.map((win, i) => (
-        <span key={i} className={cn("h-1.5 w-1.5 rounded-[2px]", win ? "bg-ok" : "bg-fg-mute/45")} />
+        <span key={i} className={cn("h-1.5 w-1.5 rounded-[2px]", win ? "bg-green-500" : "bg-red-500")} />
       ))}
     </div>
   );
