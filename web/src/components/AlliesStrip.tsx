@@ -52,7 +52,7 @@ export function AlliesStrip({
     <div className="border-t border-hairline px-4 py-2.5">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-3 text-left"
+        className="group flex w-full items-center gap-3 text-left"
         aria-expanded={expanded}
       >
         <span className="label text-[11px] text-fg-mute">{t(lang, "allies")}</span>
@@ -65,7 +65,7 @@ export function AlliesStrip({
         </span>
         <ChevronDown
           className={cn(
-            "h-4 w-4 shrink-0 text-fg-mute transition-transform duration-150 ease-[var(--ease-out-quart)]",
+            "h-4 w-4 shrink-0 text-fg-mute transition-[transform,color] duration-150 ease-[var(--ease-out-quart)] md:group-hover:text-fg-dim",
             expanded && "rotate-180",
           )}
         />

@@ -205,7 +205,7 @@ export function PartyDrawer({
                     "rounded-full border px-3.5 py-1.5 text-sm font-semibold transition-colors duration-150 ease-[var(--ease-out-quart)]",
                     active
                       ? "border-accent bg-accent text-on-accent"
-                      : "border-hairline bg-surface text-fg-dim active:bg-surface-hi",
+                      : "border-hairline bg-surface text-fg-dim md:hover:border-fg-mute/70 md:hover:text-fg active:bg-surface-hi",
                   )}
                 >
                   {queueLabel(lang, q.id)}
@@ -252,7 +252,7 @@ export function PartyDrawer({
         <button
           onClick={leave}
           disabled={busy}
-          className="flex w-full items-center justify-center gap-2 py-1.5 text-sm font-medium text-fg-mute active:text-fg-dim disabled:opacity-45"
+          className="flex w-full items-center justify-center gap-2 py-1.5 text-sm font-medium text-fg-mute md:hover:text-fg-dim active:text-fg-dim disabled:opacity-45"
         >
           <LogOut className="h-4 w-4" />
           {t(lang, "leaveParty")}
@@ -313,7 +313,7 @@ function MemberRow({
           onClick={onKick}
           disabled={busy}
           aria-label={t(lang, "kick")}
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-fg-mute active:bg-surface-hi active:text-accent disabled:opacity-45"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-fg-mute md:hover:bg-surface-hi md:hover:text-accent active:bg-surface-hi active:text-accent disabled:opacity-45"
         >
           <UserMinus className="h-4 w-4" />
         </button>
@@ -350,7 +350,7 @@ function Segmented({
             aria-pressed={active}
             className={cn(
               "rounded-full px-3 py-1 text-xs font-semibold transition-colors duration-150 ease-[var(--ease-out-quart)]",
-              active ? "bg-accent text-on-accent" : "text-fg-mute",
+              active ? "bg-accent text-on-accent" : "text-fg-mute md:hover:text-fg-dim",
             )}
           >
             {o.label}

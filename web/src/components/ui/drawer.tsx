@@ -55,6 +55,9 @@ export function Drawer({
         aria-labelledby={labelledBy}
         className={cn(
           "absolute inset-x-0 bottom-0 flex max-h-[88dvh] flex-col rounded-t-[var(--radius-card)] border-t border-hairline bg-bg",
+          // ≥md the app is a centered frame, so the sheet matches its width and
+          // centers under it rather than spanning the whole desktop viewport.
+          "md:mx-auto md:max-w-[26.5rem]",
           "transition-transform duration-200 ease-[var(--ease-out-quart)] will-change-transform",
           open ? "translate-y-0" : "translate-y-full",
         )}

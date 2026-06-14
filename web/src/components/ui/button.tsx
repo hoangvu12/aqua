@@ -9,10 +9,10 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        accent: "bg-accent text-on-accent active:bg-accent-hi",
+        accent: "bg-accent text-on-accent md:hover:bg-accent-hi active:bg-accent-hi",
         surface:
-          "bg-surface text-fg border border-hairline active:bg-surface-hi",
-        ghost: "bg-transparent text-fg-dim active:bg-surface",
+          "bg-surface text-fg border border-hairline md:hover:bg-surface-hi active:bg-surface-hi",
+        ghost: "bg-transparent text-fg-dim md:hover:bg-surface md:hover:text-fg active:bg-surface",
       },
       size: {
         md: "h-12 px-4",

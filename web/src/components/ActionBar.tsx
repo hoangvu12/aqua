@@ -186,7 +186,7 @@ function HoldLockButton({
           ? "border-hairline bg-surface text-fg-mute opacity-45"
           : holding
             ? "border-accent text-on-accent"
-            : "border-hairline bg-surface text-fg active:bg-surface-hi",
+            : "border-hairline bg-surface text-fg active:bg-surface-hi md:hover:bg-surface-hi",
       )}
     >
       {/* Progress fill: sweeps over the hold, snaps back on release. */}

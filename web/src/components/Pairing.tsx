@@ -40,11 +40,11 @@ export function Pairing({
   };
 
   return (
-    <main className="flex min-h-dvh flex-col px-6 py-8">
+    <main className="flex h-full flex-1 flex-col px-6 py-8">
       <div className="flex justify-end">
         <button
           onClick={onToggleLang}
-          className="rounded-full border border-hairline px-2.5 py-1 text-xs font-semibold text-fg-dim active:bg-surface"
+          className="rounded-full border border-hairline px-2.5 py-1 text-xs font-semibold text-fg-dim md:hover:bg-surface md:hover:text-fg active:bg-surface"
         >
           {lang === "vi" ? "VI" : "EN"}
         </button>

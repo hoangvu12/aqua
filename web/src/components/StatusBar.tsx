@@ -82,7 +82,7 @@ export function StatusBar({
           <ConnectionChip conn={conn} lang={lang} />
           <button
             onClick={onToggleLang}
-            className="rounded-full border border-hairline px-2.5 py-0.5 text-xs font-semibold text-fg-dim active:bg-surface"
+            className="rounded-full border border-hairline px-2.5 py-0.5 text-xs font-semibold text-fg-dim md:hover:bg-surface md:hover:text-fg active:bg-surface"
           >
             {lang === "vi" ? "VI" : "EN"}
           </button>

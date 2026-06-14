@@ -48,7 +48,7 @@ function Pill({
         "shrink-0 rounded-full border px-3.5 py-1.5 text-sm font-semibold transition-colors duration-150",
         active
           ? "border-transparent bg-accent text-on-accent"
-          : "border-hairline bg-surface text-fg-dim active:bg-surface-hi",
+          : "border-hairline bg-surface text-fg-dim md:hover:border-fg-mute/70 md:hover:text-fg active:bg-surface-hi",
       )}
     >
       {children}

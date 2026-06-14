@@ -86,3 +86,11 @@
     scrollbar-width: none;
   }
 }
+
+/* Ambient stage art (≥md) fades in when the selected agent changes — opacity
+   only, capped by the layer's own opacity utility. See AppShell. */
+@keyframes stage-in {
+  from {
+    opacity: 0;
+  }
+}

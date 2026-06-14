@@ -33,6 +33,7 @@ export function AgentTile({
         "group relative aspect-square overflow-hidden rounded-[var(--radius-tile)] border bg-surface transition-colors duration-150",
         selected ? "border-accent ring-2 ring-accent" : "border-hairline",
         !disabled && "active:bg-surface-hi",
+        !disabled && !selected && "md:hover:border-fg-mute/70",
         reason && "opacity-40 grayscale",
       )}
     >

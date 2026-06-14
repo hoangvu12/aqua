@@ -27,10 +27,13 @@ export function Scoreboard({
   const enemy = players.filter((p) => p.team === "enemy");
 
   return (
-    <div className="no-scrollbar flex-1 overflow-y-auto px-3 py-2.5">
+    <div className="no-scrollbar flex-1 overflow-y-auto px-3 py-2.5 md:px-5 md:py-4">
       {score && <ScoreHeader ally={score.ally} enemy={score.enemy} />}
-      <Team label={t(lang, "teamAlly")} players={ally} catalog={catalog} lang={lang} accent />
-      <Team label={t(lang, "teamEnemy")} players={enemy} catalog={catalog} lang={lang} />
+      {/* Phone: teams stack. Wide frame (≥md): teams sit side-by-side as a table. */}
+      <div className="md:grid md:grid-cols-2 md:gap-x-5">
+        <Team label={t(lang, "teamAlly")} players={ally} catalog={catalog} lang={lang} accent />
+        <Team label={t(lang, "teamEnemy")} players={enemy} catalog={catalog} lang={lang} />
+      </div>
     </div>
   );
 }
@@ -100,7 +103,7 @@ function Row({ seat, catalog, lang }: { seat: MatchSeat; catalog: Catalog | null
       />
       <button
         onClick={() => s && setOpen((v) => !v)}
-        className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left"
+        className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left md:hover:bg-surface-hi"
         aria-expanded={open}
       >
         <AgentAvatar agent={agent} />

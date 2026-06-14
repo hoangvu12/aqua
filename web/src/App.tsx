@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRelay } from "@/lib/relay";
 import { useCatalog } from "@/lib/use-catalog";
-import { agentByUuid, rolesOf } from "@/lib/catalog";
+import { agentByUuid, mapByMapId, rolesOf } from "@/lib/catalog";
 import {
   clearCreds,
   loadCreds,
@@ -25,6 +25,7 @@ import { PartyDrawer } from "@/components/PartyDrawer";
 import { Pairing } from "@/components/Pairing";
 import { StateScreen } from "@/components/StateScreen";
 import { Scoreboard } from "@/components/Scoreboard";
+import { AppShell } from "@/components/AppShell";
 
 const CONTROLLER_STATES = new Set([
   "menus",
@@ -110,7 +111,9 @@ export default function App() {
   // ── Pairing gate ───────────────────────────────────────────────────────────
   if (!creds) {
     return (
-      <Pairing pairLink={pairLink} onPaired={setCreds} lang={lang} onToggleLang={toggleLang} />
+      <AppShell>
+        <Pairing pairLink={pairLink} onPaired={setCreds} lang={lang} onToggleLang={toggleLang} />
+      </AppShell>
     );
   }
 
@@ -146,9 +149,16 @@ export default function App() {
 
   const showController =
     !!game && !!catalog && CONTROLLER_STATES.has(game.state);
+  const onScoreboard =
+    !!game && game.state === "ingame" && game.match_players.length > 0;
+
+  // Stage backdrop (≥md): the active map carries the wash, the live selection
+  // its agent portrait. Absent on pre-match menus, which is fine — the scrim
+  // alone still frames the controller.
+  const backdropMap = game ? mapByMapId(catalog, game.map_id ?? "") : undefined;
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden">
+    <AppShell wide={onScoreboard} agent={selectedAgent} map={backdropMap}>
       <StatusBar
         conn={relay.conn}
         game={game}
@@ -215,7 +225,7 @@ export default function App() {
       ) : (
         <StateScreen kind={screenKind(game, graceExpired)} lang={lang} />
       )}
-    </div>
+    </AppShell>
   );
 }
 
