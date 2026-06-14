@@ -18,6 +18,7 @@ type fakeSource struct {
 	puuid   string
 	selects []string
 	locks   []string
+	startMM int // count of StartMatchmaking calls (party owner-gate test)
 }
 
 func (f *fakeSource) Snapshot(context.Context) (Snapshot, error) { return f.snap, nil }
@@ -34,22 +35,34 @@ func (f *fakeSource) PUUID() string                      { return f.puuid }
 
 // Party actions are no-ops for the picker unit tests (the owner-gating logic
 // lives in the picker, not the source).
-func (f *fakeSource) GenerateInviteCode(context.Context, string) error      { return nil }
-func (f *fakeSource) DisableInviteCode(context.Context, string) error       { return nil }
-func (f *fakeSource) JoinByCode(context.Context, string) error              { return nil }
-func (f *fakeSource) LeaveParty(context.Context) error                      { return nil }
-func (f *fakeSource) KickMember(context.Context, string) error              { return nil }
-func (f *fakeSource) SetAccessibility(context.Context, string, bool) error  { return nil }
-func (f *fakeSource) ChangeQueue(context.Context, string, string) error     { return nil }
-func (f *fakeSource) StartMatchmaking(context.Context, string) error        { return nil }
-func (f *fakeSource) StopMatchmaking(context.Context, string) error         { return nil }
+func (f *fakeSource) GenerateInviteCode(context.Context, string) error     { return nil }
+func (f *fakeSource) DisableInviteCode(context.Context, string) error      { return nil }
+func (f *fakeSource) JoinByCode(context.Context, string) error             { return nil }
+func (f *fakeSource) LeaveParty(context.Context) error                     { return nil }
+func (f *fakeSource) KickMember(context.Context, string) error             { return nil }
+func (f *fakeSource) SetAccessibility(context.Context, string, bool) error { return nil }
+func (f *fakeSource) ChangeQueue(context.Context, string, string) error    { return nil }
+func (f *fakeSource) StartMatchmaking(context.Context, string) error       { f.startMM++; return nil }
+func (f *fakeSource) StopMatchmaking(context.Context, string) error        { return nil }
 
-type capSink struct{ states []State }
+type capResult struct {
+	reqID   string
+	ok      bool
+	message string
+}
 
-func (c *capSink) SendState(s State)               { c.states = append(c.states, s) }
-func (c *capSink) SendResult(string, bool, string) {}
-func (c *capSink) SendAuthStatus(bool, string)     {}
-func (c *capSink) last() State                     { return c.states[len(c.states)-1] }
+type capSink struct {
+	states  []State
+	results []capResult
+}
+
+func (c *capSink) SendState(s State) { c.states = append(c.states, s) }
+func (c *capSink) SendResult(reqID string, ok bool, message string) {
+	c.results = append(c.results, capResult{reqID, ok, message})
+}
+func (c *capSink) SendAuthStatus(bool, string) {}
+func (c *capSink) last() State                 { return c.states[len(c.states)-1] }
+func (c *capSink) lastResult() capResult       { return c.results[len(c.results)-1] }
 
 func newPicker(cfg *config.Config, src Source) (*Picker, *capSink) {
 	sink := &capSink{}
@@ -258,6 +271,37 @@ func TestDisarmOnMatchEnd(t *testing.T) {
 	}
 	if got := sink.last().PrepickStatus; got != "none" {
 		t.Errorf("after disarm: status = %q, want none", got)
+	}
+}
+
+// TestPartyOwnerGate: an owner-only party command (start matchmaking) is refused
+// without ever reaching the source when we don't own the party, and goes through
+// when we do. Covers the ownerParty gate shared by the party_* handlers.
+func TestPartyOwnerGate(t *testing.T) {
+	ctx := context.Background()
+
+	// Not the owner → refused, source untouched.
+	src := &fakeSource{snap: Snapshot{Running: true, Phase: "lobby", PartyID: "p1", IsOwner: false}}
+	p, sink := newPicker(&config.Config{}, src)
+	p.poll(ctx) // populate partyID/partyOwner from the snapshot
+	p.HandlePhoneFrame(ctx, "party_start_matchmaking", "r1", nil)
+	if src.startMM != 0 {
+		t.Errorf("non-owner reached source: startMM = %d, want 0", src.startMM)
+	}
+	if r := sink.lastResult(); r.ok || r.reqID != "r1" {
+		t.Errorf("non-owner result = %+v, want ok=false reqID=r1", r)
+	}
+
+	// Owner → the command reaches the source and replies ok.
+	src2 := &fakeSource{snap: Snapshot{Running: true, Phase: "lobby", PartyID: "p1", IsOwner: true}}
+	p2, sink2 := newPicker(&config.Config{}, src2)
+	p2.poll(ctx)
+	p2.HandlePhoneFrame(ctx, "party_start_matchmaking", "r2", nil)
+	if src2.startMM != 1 {
+		t.Errorf("owner did not reach source: startMM = %d, want 1", src2.startMM)
+	}
+	if r := sink2.lastResult(); !r.ok || r.reqID != "r2" {
+		t.Errorf("owner result = %+v, want ok=true reqID=r2", r)
 	}
 }
 

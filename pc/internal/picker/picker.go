@@ -431,20 +431,40 @@ func (p *Picker) HandlePhoneFrame(ctx context.Context, typ, reqID string, data j
 		p.sink.SendResult(reqID, true, "config updated")
 		p.triggerRefresh()
 
-	// ── Party (lobby) management ────────────────────────────────────────────
-	// Owner-only commands check IsOwner first and never issue the Riot call when
-	// we don't own the party (the API rejects them anyway — this is honest UX +
-	// defense in depth). join/leave are available to any member.
+	case "test_auth":
+		if err := p.src.Authenticate(ctx); err != nil {
+			p.sink.SendAuthStatus(false, err.Error())
+			return
+		}
+		p.sink.SendAuthStatus(true, "riot auth ok")
+		p.triggerRefresh()
+
+	default:
+		// Party (lobby) management commands are namespaced party_*; everything
+		// else (e.g. a legacy ping) is an unknown frame and ignored.
+		if strings.HasPrefix(typ, "party_") {
+			p.handlePartyFrame(ctx, typ, reqID, data)
+		}
+	}
+}
+
+// handlePartyFrame applies a party_* (lobby) command. Split out of
+// HandlePhoneFrame so the core picker commands and the lobby-management surface
+// stay separately legible. Owner-only commands gate on ownerParty first and
+// never issue the Riot call when we don't own the party (the API rejects them
+// anyway — honest UX + defense in depth). join/leave are open to any member.
+func (p *Picker) handlePartyFrame(ctx context.Context, typ, reqID string, data json.RawMessage) {
+	switch typ {
 	case "party_generate_code":
-		pid, owner := p.currentParty()
-		if !p.requireParty(reqID, pid) || !p.requireOwner(reqID, owner) {
+		pid, ok := p.ownerParty(reqID)
+		if !ok {
 			return
 		}
 		p.partyAction(reqID, "invite code generated", func() error { return p.src.GenerateInviteCode(ctx, pid) })
 
 	case "party_disable_code":
-		pid, owner := p.currentParty()
-		if !p.requireParty(reqID, pid) || !p.requireOwner(reqID, owner) {
+		pid, ok := p.ownerParty(reqID)
+		if !ok {
 			return
 		}
 		p.partyAction(reqID, "invite code disabled", func() error { return p.src.DisableInviteCode(ctx, pid) })
@@ -480,8 +500,8 @@ func (p *Picker) HandlePhoneFrame(ctx context.Context, typ, reqID string, data j
 		p.partyAction(reqID, "removed from party", func() error { return p.src.KickMember(ctx, d.PUUID) })
 
 	case "party_set_accessibility":
-		pid, owner := p.currentParty()
-		if !p.requireParty(reqID, pid) || !p.requireOwner(reqID, owner) {
+		pid, ok := p.ownerParty(reqID)
+		if !ok {
 			return
 		}
 		var d struct {
@@ -492,8 +512,8 @@ func (p *Picker) HandlePhoneFrame(ctx context.Context, typ, reqID string, data j
 		p.partyAction(reqID, "party updated", func() error { return p.src.SetAccessibility(ctx, pid, open) })
 
 	case "party_set_queue":
-		pid, owner := p.currentParty()
-		if !p.requireParty(reqID, pid) || !p.requireOwner(reqID, owner) {
+		pid, ok := p.ownerParty(reqID)
+		if !ok {
 			return
 		}
 		var d struct {
@@ -507,29 +527,18 @@ func (p *Picker) HandlePhoneFrame(ctx context.Context, typ, reqID string, data j
 		p.partyAction(reqID, "queue set", func() error { return p.src.ChangeQueue(ctx, pid, d.QueueID) })
 
 	case "party_start_matchmaking":
-		pid, owner := p.currentParty()
-		if !p.requireParty(reqID, pid) || !p.requireOwner(reqID, owner) {
+		pid, ok := p.ownerParty(reqID)
+		if !ok {
 			return
 		}
 		p.partyAction(reqID, "searching for a match", func() error { return p.src.StartMatchmaking(ctx, pid) })
 
 	case "party_stop_matchmaking":
-		pid, owner := p.currentParty()
-		if !p.requireParty(reqID, pid) || !p.requireOwner(reqID, owner) {
+		pid, ok := p.ownerParty(reqID)
+		if !ok {
 			return
 		}
 		p.partyAction(reqID, "search cancelled", func() error { return p.src.StopMatchmaking(ctx, pid) })
-
-	case "test_auth":
-		if err := p.src.Authenticate(ctx); err != nil {
-			p.sink.SendAuthStatus(false, err.Error())
-			return
-		}
-		p.sink.SendAuthStatus(true, "riot auth ok")
-		p.triggerRefresh()
-
-	default:
-		// Unknown / non-command frame (e.g. legacy ping) — ignore.
 	}
 }
 
@@ -562,6 +571,17 @@ func (p *Picker) requireOwner(reqID string, owner bool) bool {
 		return false
 	}
 	return true
+}
+
+// ownerParty returns the current party id when we both have a party and own it —
+// the gate every owner-only, party-scoped command shares. ok=false means a
+// failure reply was already sent and the caller should return.
+func (p *Picker) ownerParty(reqID string) (pid string, ok bool) {
+	id, owner := p.currentParty()
+	if !p.requireParty(reqID, id) || !p.requireOwner(reqID, owner) {
+		return "", false
+	}
+	return id, true
 }
 
 // partyAction runs a party Riot call, replies ok/err to the phone, and triggers a
