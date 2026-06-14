@@ -195,12 +195,20 @@ function PlayerName({ name, self, you }: { name: string; self: boolean; you: str
 }
 
 function Streak({ recent }: { recent: boolean[] }) {
+  // Always 5 slots so every row's streak is the same width and the dots line up
+  // into a clean column. Results fill from the left (newest first); unused slots
+  // are transparent spacers — no ragged edges, no false "neutral" result.
   const r = recent.slice(0, 5);
-  if (r.length === 0) return <span className="h-1.5" />;
   return (
-    <div className="flex gap-0.5">
-      {r.map((win, i) => (
-        <span key={i} className={cn("h-1.5 w-1.5 rounded-[2px]", win ? "bg-green-500" : "bg-red-500")} />
+    <div className="flex h-1.5 items-center gap-0.5 leading-none">
+      {Array.from({ length: 5 }, (_, i) => (
+        <span
+          key={i}
+          className={cn(
+            "block h-1.5 w-1.5 shrink-0 rounded-[2px] align-middle",
+            i >= r.length ? "bg-transparent" : r[i] ? "bg-green-500" : "bg-red-500",
+          )}
+        />
       ))}
     </div>
   );
