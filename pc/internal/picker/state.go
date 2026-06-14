@@ -52,19 +52,21 @@ type PartyMember struct {
 // Teammate is one ally-team seat as shown in the allies strip. Self marks the
 // local player's own seat so the phone can highlight it among the team.
 type Teammate struct {
-	Name      string            `json:"name"`
-	AgentUUID string            `json:"agent_uuid"`
-	Status    string            `json:"status"` // ""|selected|locked
-	Self      bool              `json:"self"`
-	Stats     *riot.PlayerStats `json:"stats,omitempty"` // tracker row; absent until fetched
+	Name       string            `json:"name"`
+	AgentUUID  string            `json:"agent_uuid"`
+	Status     string            `json:"status"` // ""|selected|locked
+	Self       bool              `json:"self"`
+	Stats      *riot.PlayerStats `json:"stats,omitempty"` // tracker row; absent until fetched
+	PartyGroup int               `json:"party_group"`     // 0 = none; 1..n = inferred premade group
 }
 
 // MatchSeat is one player row in the live-match scoreboard. Unlike Teammate it
 // spans both teams (Team ∈ ally|enemy) and carries no agent-select status.
 type MatchSeat struct {
-	Name      string            `json:"name"`
-	AgentUUID string            `json:"agent_uuid"`
-	Team      string            `json:"team"` // "ally"|"enemy"
-	Self      bool              `json:"self"`
-	Stats     *riot.PlayerStats `json:"stats,omitempty"`
+	Name       string            `json:"name"`
+	AgentUUID  string            `json:"agent_uuid"`
+	Team       string            `json:"team"` // "ally"|"enemy"
+	Self       bool              `json:"self"`
+	Stats      *riot.PlayerStats `json:"stats,omitempty"`
+	PartyGroup int               `json:"party_group"` // 0 = none; 1..n = inferred premade group
 }

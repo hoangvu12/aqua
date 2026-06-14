@@ -3,6 +3,8 @@ package picker
 import (
 	"context"
 	"errors"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +15,12 @@ import (
 // tracker aggregates (Win%/K-D/ADR/HS%). Kept small: PD endpoints are
 // rate-limited and "recent form" is what the scoreboard wants, not a career.
 const recentMatchesN = 8
+
+// partyMatchesN is how many recent matches per player we scan to infer premades
+// (the shared-match co-occurrence heuristic in riot.DetectParties). Larger than
+// recentMatchesN — detection recall improves with more history — but still just
+// one match-history fetch per player, and shared match-details are cached.
+const partyMatchesN = 25
 
 // Snapshot is a game-agnostic view of the current state, produced by a Source.
 // The picker turns it into the wire `state`. Phase ∈ "menus"|"lobby"|"queue"|
@@ -60,6 +68,7 @@ type PlayerSlot struct {
 	Name           string            // resolved Game#Tag (filled by the stats fetch)
 	Team           string            // "ally"|"enemy" (live match scoreboard)
 	Stats          *riot.PlayerStats // tracker row; nil until the background fetch fills it
+	PartyGroup     int               // 0 = no detected premade; 1..n = inferred party group (per match)
 }
 
 // Source is everything the picker needs from "the game". Implemented by
@@ -98,6 +107,15 @@ type riotSource struct {
 	statsKey      string                      // match id the cache is for
 	statsByPUUID  map[string]riot.PlayerStats // nil until the fetch completes
 	statsFetching bool
+
+	// Inferred party groups (premade detection), same once-per-roster background
+	// pattern as stats. partyByPUUID maps puuid → group id (1..n; absent = solo).
+	// Keyed by a roster signature so it recomputes when the set of players changes
+	// (pregame's 5 allies → core-game's 10), not on every poll.
+	partyMu       sync.Mutex
+	partySig      string
+	partyByPUUID  map[string]int
+	partyFetching bool
 
 	// onUpdate is fired when a background stats fetch fills the cache, so the
 	// picker re-emits the now-complete scoreboard without waiting for the
@@ -212,6 +230,7 @@ func (s *riotSource) snapshotLocked(ctx context.Context) (Snapshot, error) {
 			puuids = append(puuids, p.Subject)
 		}
 		attachStats(snap.Players, s.lobbyStats(c, matchID, "", puuids))
+		attachPartyGroups(snap.Players, s.partyGroups(c, matchID, snap.Players))
 		return snap, nil
 	}
 
@@ -246,6 +265,7 @@ func (s *riotSource) snapshotLocked(ctx context.Context) (Snapshot, error) {
 			puuids = append(puuids, p.Subject)
 		}
 		attachStats(snap.Players, s.lobbyStats(c, cgMatchID, "", puuids))
+		attachPartyGroups(snap.Players, s.partyGroups(c, cgMatchID, snap.Players))
 		return snap, nil
 	}
 
@@ -378,6 +398,84 @@ func attachStats(players []PlayerSlot, stats map[string]riot.PlayerStats) {
 			players[i].Name = st.Name
 		}
 	}
+}
+
+// partyGroups returns the inferred premade group per puuid for the current
+// roster, kicking off a one-shot background detection when the roster changes.
+// Like lobbyStats it never blocks the poll: it returns whatever is computed now
+// and fires onUpdate when a fresh result lands. Always all-queues — a party is a
+// party regardless of playlist. Caller need not hold s.mu.
+func (s *riotSource) partyGroups(c *riot.Client, matchID string, players []PlayerSlot) map[string]int {
+	sig := rosterSig(matchID, players)
+
+	s.partyMu.Lock()
+	defer s.partyMu.Unlock()
+
+	if sig != s.partySig {
+		s.partySig, s.partyByPUUID, s.partyFetching = sig, nil, false
+	}
+
+	if matchID != "" && s.partyByPUUID == nil && !s.partyFetching && len(players) >= 2 {
+		s.partyFetching = true
+		key := sig
+		team := make(map[string]string, len(players))
+		for _, p := range players {
+			if p.PUUID != "" {
+				team[p.PUUID] = p.Team
+			}
+		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			groups := c.DetectParties(ctx, team, "", partyMatchesN)
+			byPUUID := make(map[string]int, len(team))
+			for i, g := range groups {
+				for _, puuid := range g {
+					byPUUID[puuid] = i + 1
+				}
+			}
+			s.partyMu.Lock()
+			fresh := s.partySig == key
+			if fresh {
+				s.partyByPUUID = byPUUID // non-nil (maybe empty) → "computed; don't refetch"
+			}
+			s.partyFetching = false
+			s.partyMu.Unlock()
+			if fresh && s.onUpdate != nil {
+				s.onUpdate() // re-emit so the borders appear without waiting for a tick
+			}
+		}()
+	}
+
+	out := make(map[string]int, len(s.partyByPUUID))
+	for k, v := range s.partyByPUUID {
+		out[k] = v
+	}
+	return out
+}
+
+// attachPartyGroups stamps each player's inferred group id (0 = solo/none).
+func attachPartyGroups(players []PlayerSlot, groups map[string]int) {
+	if len(groups) == 0 {
+		return
+	}
+	for i := range players {
+		players[i].PartyGroup = groups[players[i].PUUID]
+	}
+}
+
+// rosterSig is a stable key for a match's roster (match id + sorted puuids) so
+// party detection recomputes when the set of players changes — pregame's 5 allies
+// to core-game's 10 — but not on every poll.
+func rosterSig(matchID string, players []PlayerSlot) string {
+	ids := make([]string, 0, len(players))
+	for _, p := range players {
+		if p.PUUID != "" {
+			ids = append(ids, p.PUUID)
+		}
+	}
+	sort.Strings(ids)
+	return matchID + "#" + strings.Join(ids, ",")
 }
 
 // partyPhase maps a party's matchmaking state to the pre-match wire phase.

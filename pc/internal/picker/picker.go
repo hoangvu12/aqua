@@ -260,11 +260,12 @@ func (p *Picker) build(snap Snapshot, err error) State {
 		puuid := p.src.PUUID()
 		for _, pl := range snap.Players {
 			st.MatchPlayers = append(st.MatchPlayers, MatchSeat{
-				Name:      pl.Name,
-				AgentUUID: pl.CharacterID,
-				Team:      pl.Team,
-				Self:      pl.PUUID == puuid,
-				Stats:     pl.Stats,
+				Name:       pl.Name,
+				AgentUUID:  pl.CharacterID,
+				Team:       pl.Team,
+				Self:       pl.PUUID == puuid,
+				Stats:      pl.Stats,
+				PartyGroup: pl.PartyGroup,
 			})
 		}
 	case "pregame":
@@ -279,11 +280,12 @@ func (p *Picker) build(snap Snapshot, err error) State {
 		for _, pl := range snap.Players {
 			self := pl.PUUID == puuid
 			st.Teammates = append(st.Teammates, Teammate{
-				Name:      pl.Name,
-				AgentUUID: pl.CharacterID,
-				Status:    pl.SelectionState,
-				Self:      self,
-				Stats:     pl.Stats,
+				Name:       pl.Name,
+				AgentUUID:  pl.CharacterID,
+				Status:     pl.SelectionState,
+				Self:       self,
+				Stats:      pl.Stats,
+				PartyGroup: pl.PartyGroup,
 			})
 			if self {
 				ourState, ourAgent = pl.SelectionState, pl.CharacterID

@@ -71,10 +71,17 @@ function Row({ seat, catalog, lang }: { seat: MatchSeat; catalog: Catalog | null
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-xl border bg-surface",
+        "relative overflow-hidden rounded-xl border bg-surface",
         seat.self ? "border-accent/45" : "border-hairline",
       )}
     >
+      {/* Party indicator: a left strip colored per inferred premade. Always
+          rendered (transparent when solo) so grouped/ungrouped rows align. */}
+      <span
+        aria-hidden
+        className="absolute inset-y-0 left-0 w-[3px]"
+        style={{ backgroundColor: partyColor(seat.party_group) }}
+      />
       <button
         onClick={() => s && setOpen((v) => !v)}
         className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left"
@@ -211,4 +218,13 @@ function Stat({ label, value }: { label: string; value: string }) {
 /** Only a strong K/D earns color; the brand red is reserved for the controller. */
 function kdColor(kd: number): string {
   return kd >= 1.3 ? "text-ok" : "text-fg";
+}
+
+/** Distinct hues for inferred party groups — deliberately not the win/loss
+ * green/red or the brand accent, so a party strip never reads as anything else.
+ * Cycles if a match somehow has more groups than colors. */
+const PARTY_COLORS = ["#38bdf8", "#fbbf24", "#a78bfa", "#fb7185", "#34d399"];
+function partyColor(group: number): string {
+  if (!group) return "transparent"; // solo → invisible strip, same width (no layout shift)
+  return PARTY_COLORS[(group - 1) % PARTY_COLORS.length];
 }

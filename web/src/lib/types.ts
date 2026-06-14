@@ -42,6 +42,8 @@ export interface Teammate {
   status: "" | "selected" | "locked";
   self: boolean;
   stats?: PlayerStats | null;
+  /** Inferred premade group: 0 = none, 1..n = a detected party (per match). */
+  party_group: number;
 }
 
 /** Party accessibility: OPEN = anyone with the code joins, CLOSED = invite only.
@@ -66,6 +68,8 @@ export interface MatchSeat {
   team: "ally" | "enemy";
   self: boolean;
   stats?: PlayerStats | null;
+  /** Inferred premade group: 0 = none, 1..n = a detected party (per match). */
+  party_group: number;
 }
 
 /** The `state` object pushed by the PC. Fields are always present. */
