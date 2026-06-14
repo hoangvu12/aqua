@@ -32,6 +32,11 @@ interface Session {
   enabled: boolean;
   prepick: string;
   phase: "menus" | "lobby" | "queue" | "matchfound" | "pregame" | "locked" | "ingame";
+  // Party (lobby) state, mutated by the party_* commands.
+  inviteCode: string;
+  partyClosed: boolean;
+  queue: string;
+  queueEntry: number; // unix millis when matchmaking started, 0 when not queuing
 }
 
 // Tracker row helper (mirrors riot.PlayerStats). Tier numbers follow
@@ -95,8 +100,18 @@ const SCOREBOARD = [
     stats: stat("noob#123", 0, 0, 0.61, 88, 11.2, 25, [false, false, true, false]) },
 ];
 
+// Pre-match party roster (self = owner + one ally), so the lobby drawer renders.
+const PARTY_MEMBERS = [
+  { puuid: "mock-self", name: "You", is_owner: true, is_ready: true, self: true,
+    stats: stat("You", 19, 24, 1.21, 158, 28.0, 52, [true, false, true, true, false]) },
+  { puuid: "mock-ally-1", name: "wazuu#1406", is_owner: false, is_ready: false, self: false,
+    stats: stat("wazuu#1406", 19, 20, 1.46, 194, 22.0, 45, [true, true, false, true, true]) },
+];
+
 function makeState(s: Session) {
   const inSelect = s.phase === "pregame" || s.phase === "locked";
+  const preMatch =
+    s.phase === "menus" || s.phase === "lobby" || s.phase === "queue" || s.phase === "matchfound";
   const hasQueue = inSelect || s.phase === "lobby" || s.phase === "queue" || s.phase === "matchfound";
   return {
     type: "state",
@@ -104,7 +119,7 @@ function makeState(s: Session) {
       state: s.phase,
       match_id: inSelect ? "mock-match" : "",
       map_id: inSelect ? "/Game/Maps/Triad/Triad" : "", // Haven
-      queue_id: hasQueue ? "competitive" : "",
+      queue_id: hasQueue ? s.queue : "",
       prepick_agent_uuid: s.prepick,
       auto_lock: s.autoLock,
       enabled: s.enabled,
@@ -128,6 +143,15 @@ function makeState(s: Session) {
       match_players: s.phase === "ingame" ? SCOREBOARD : [],
       self_agent_uuid: s.selfAgent,
       self_status: s.selfStatus,
+      // Party (lobby) surface — pre-match states only (self is owner so the
+      // owner-only controls are exercisable).
+      party_id: preMatch ? "mock-party" : "",
+      party_accessibility: preMatch ? (s.partyClosed ? "CLOSED" : "OPEN") : "",
+      party_invite_code: preMatch ? s.inviteCode : "",
+      party_max_size: preMatch ? 5 : 0,
+      is_party_owner: preMatch,
+      queue_entry_time: s.phase === "queue" ? s.queueEntry : 0,
+      party_members: preMatch ? PARTY_MEMBERS : [],
     },
   };
 }
@@ -167,7 +191,10 @@ const server = Bun.serve<{ s: Session }, undefined>({
       const start = (Bun.env.MOCK_PHASE as Session["phase"]) || "menus";
       const ok = srv.upgrade(req, {
         data: {
-          s: { selfAgent: "", selfStatus: "", autoLock: false, enabled: true, prepick: "", phase: start },
+          s: {
+            selfAgent: "", selfStatus: "", autoLock: false, enabled: true, prepick: "", phase: start,
+            inviteCode: "", partyClosed: false, queue: "competitive", queueEntry: 0,
+          },
         },
       });
       return ok ? undefined : new Response("upgrade failed", { status: 426 });
@@ -243,6 +270,60 @@ const server = Bun.serve<{ s: Session }, undefined>({
           if (typeof f.data?.auto_lock === "boolean") sess.autoLock = f.data.auto_lock;
           if (typeof f.data?.prepick_agent_uuid === "string") sess.prepick = f.data.prepick_agent_uuid;
           result(f.reqId, true, "config updated");
+          pushState();
+          break;
+
+        // ── Party (lobby) management (self is always owner in the mock) ──────────
+        case "party_generate_code":
+          sess.inviteCode = "MOCK42";
+          result(f.reqId, true, "invite code generated");
+          pushState();
+          break;
+        case "party_disable_code":
+          sess.inviteCode = "";
+          result(f.reqId, true, "invite code disabled");
+          pushState();
+          break;
+        case "party_join_by_code":
+          result(f.reqId, true, "joined party");
+          pushState();
+          break;
+        case "party_leave":
+          result(f.reqId, true, "left party");
+          pushState();
+          break;
+        case "party_kick":
+          result(f.reqId, true, "removed from party");
+          pushState();
+          break;
+        case "party_set_accessibility":
+          sess.partyClosed = f.data?.accessibility === "CLOSED";
+          result(f.reqId, true, "party updated");
+          pushState();
+          break;
+        case "party_set_queue":
+          if (typeof f.data?.queueId === "string") sess.queue = f.data.queueId;
+          result(f.reqId, true, "queue set");
+          pushState();
+          break;
+        case "party_start_matchmaking":
+          sess.phase = "queue";
+          sess.queueEntry = Date.now();
+          result(f.reqId, true, "searching for a match");
+          pushState();
+          // Demo: pretend a match is found after 8s so the drawer auto-closes and
+          // the bar flips to "Match found" (only if still searching).
+          setTimeout(() => {
+            if (sess.phase === "queue") {
+              sess.phase = "matchfound";
+              pushState();
+            }
+          }, 8000);
+          break;
+        case "party_stop_matchmaking":
+          sess.phase = "lobby";
+          sess.queueEntry = 0;
+          result(f.reqId, true, "search cancelled");
           pushState();
           break;
       }

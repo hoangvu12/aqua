@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,8 @@ type Picker struct {
 	last            State
 	hasLast         bool
 	matchID         string
+	partyID         string // current party id, for routing party commands
+	partyOwner      bool   // whether we own the party (gates owner-only commands)
 	optAgent        string // optimistic lock target, awaiting reconcile
 	optSince        time.Time
 	autoLockedMatch string // match we've already auto-locked in (fire once per match)
@@ -91,6 +94,7 @@ func (p *Picker) poll(ctx context.Context) {
 	changed := !p.hasLast || !reflect.DeepEqual(st, p.last)
 	p.last, p.hasLast = st, true
 	p.matchID = snap.MatchID
+	p.partyID, p.partyOwner = snap.PartyID, snap.IsOwner
 	fire, agent, mid := p.planAutoLock(snap.MatchID, st)
 	p.mu.Unlock()
 	if changed {
@@ -155,6 +159,7 @@ func (p *Picker) build(snap Snapshot, err error) State {
 		TakenAgentUUIDs:  []string{},
 		Teammates:        []Teammate{},
 		MatchPlayers:     []MatchSeat{},
+		PartyMembers:     []PartyMember{},
 		PrepickStatus:    "none",
 		GameLocale:       snap.Locale,
 	}
@@ -222,6 +227,19 @@ func (p *Picker) build(snap Snapshot, err error) State {
 		st.QueueID = snap.QueueID
 		p.optAgent = "" // any in-flight lock is moot outside agent select
 		st.PrepickStatus = p.derivePrepickStatus("", "", nil)
+
+		// Party (lobby) surface for the phone's drawer.
+		st.PartyID = snap.PartyID
+		st.PartyAccessibility = snap.Accessibility
+		st.PartyInviteCode = snap.InviteCode
+		st.PartyMaxSize = snap.MaxPartySize
+		st.IsPartyOwner = snap.IsOwner
+		st.QueueEntryTime = snap.QueueEntryMillis
+		for _, m := range snap.PartyMembers {
+			st.PartyMembers = append(st.PartyMembers, PartyMember{
+				PUUID: m.PUUID, Name: m.Name, IsOwner: m.IsOwner, IsReady: m.IsReady, Self: m.Self, Stats: m.Stats,
+			})
+		}
 	}
 	return st
 }
@@ -328,6 +346,95 @@ func (p *Picker) HandlePhoneFrame(ctx context.Context, typ, reqID string, data j
 		p.sink.SendResult(reqID, true, "config updated")
 		p.triggerRefresh()
 
+	// ── Party (lobby) management ────────────────────────────────────────────
+	// Owner-only commands check IsOwner first and never issue the Riot call when
+	// we don't own the party (the API rejects them anyway — this is honest UX +
+	// defense in depth). join/leave are available to any member.
+	case "party_generate_code":
+		pid, owner := p.currentParty()
+		if !p.requireParty(reqID, pid) || !p.requireOwner(reqID, owner) {
+			return
+		}
+		p.partyAction(reqID, "invite code generated", func() error { return p.src.GenerateInviteCode(ctx, pid) })
+
+	case "party_disable_code":
+		pid, owner := p.currentParty()
+		if !p.requireParty(reqID, pid) || !p.requireOwner(reqID, owner) {
+			return
+		}
+		p.partyAction(reqID, "invite code disabled", func() error { return p.src.DisableInviteCode(ctx, pid) })
+
+	case "party_join_by_code":
+		var d struct {
+			Code string `json:"code"`
+		}
+		_ = json.Unmarshal(data, &d)
+		code := strings.ToUpper(strings.TrimSpace(d.Code))
+		if code == "" {
+			p.sink.SendResult(reqID, false, "no code")
+			return
+		}
+		p.partyAction(reqID, "joined party", func() error { return p.src.JoinByCode(ctx, code) })
+
+	case "party_leave":
+		p.partyAction(reqID, "left party", func() error { return p.src.LeaveParty(ctx) })
+
+	case "party_kick":
+		_, owner := p.currentParty()
+		if !p.requireOwner(reqID, owner) {
+			return
+		}
+		var d struct {
+			PUUID string `json:"puuid"`
+		}
+		_ = json.Unmarshal(data, &d)
+		if d.PUUID == "" {
+			p.sink.SendResult(reqID, false, "no player")
+			return
+		}
+		p.partyAction(reqID, "removed from party", func() error { return p.src.KickMember(ctx, d.PUUID) })
+
+	case "party_set_accessibility":
+		pid, owner := p.currentParty()
+		if !p.requireParty(reqID, pid) || !p.requireOwner(reqID, owner) {
+			return
+		}
+		var d struct {
+			Accessibility string `json:"accessibility"`
+		}
+		_ = json.Unmarshal(data, &d)
+		open := strings.EqualFold(d.Accessibility, "OPEN")
+		p.partyAction(reqID, "party updated", func() error { return p.src.SetAccessibility(ctx, pid, open) })
+
+	case "party_set_queue":
+		pid, owner := p.currentParty()
+		if !p.requireParty(reqID, pid) || !p.requireOwner(reqID, owner) {
+			return
+		}
+		var d struct {
+			QueueID string `json:"queueId"`
+		}
+		_ = json.Unmarshal(data, &d)
+		if d.QueueID == "" {
+			p.sink.SendResult(reqID, false, "no queue")
+			return
+		}
+		p.partyAction(reqID, "queue set", func() error { return p.src.ChangeQueue(ctx, pid, d.QueueID) })
+
+	case "party_start_matchmaking":
+		pid, owner := p.currentParty()
+		if !p.requireParty(reqID, pid) || !p.requireOwner(reqID, owner) {
+			return
+		}
+		p.partyAction(reqID, "searching for a match", func() error { return p.src.StartMatchmaking(ctx, pid) })
+
+	case "party_stop_matchmaking":
+		pid, owner := p.currentParty()
+		if !p.requireParty(reqID, pid) || !p.requireOwner(reqID, owner) {
+			return
+		}
+		p.partyAction(reqID, "search cancelled", func() error { return p.src.StopMatchmaking(ctx, pid) })
+
 	case "test_auth":
 		if err := p.src.Authenticate(ctx); err != nil {
 			p.sink.SendAuthStatus(false, err.Error())
@@ -345,6 +452,42 @@ func (p *Picker) currentMatch() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.matchID
+}
+
+// currentParty returns the current party id and whether we own it (last poll).
+func (p *Picker) currentParty() (id string, owner bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.partyID, p.partyOwner
+}
+
+// requireParty fails the request if we don't have a party id yet.
+func (p *Picker) requireParty(reqID, pid string) bool {
+	if pid == "" {
+		p.sink.SendResult(reqID, false, "not in a party")
+		return false
+	}
+	return true
+}
+
+// requireOwner fails the request if we don't own the party (owner-only command).
+func (p *Picker) requireOwner(reqID string, owner bool) bool {
+	if !owner {
+		p.sink.SendResult(reqID, false, "only the party owner can do that")
+		return false
+	}
+	return true
+}
+
+// partyAction runs a party Riot call, replies ok/err to the phone, and triggers a
+// refresh so the next pushed state reflects the change (the Party read is truth).
+func (p *Picker) partyAction(reqID, okMsg string, fn func() error) {
+	if err := fn(); err != nil {
+		p.sink.SendResult(reqID, false, err.Error())
+		return
+	}
+	p.sink.SendResult(reqID, true, okMsg)
+	p.triggerRefresh()
 }
 
 func agentID(data json.RawMessage) string {

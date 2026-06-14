@@ -160,11 +160,31 @@ func (c *Client) PregameMatch(ctx context.Context, matchID string) (*PregameMatc
 }
 
 // PartyInfo is the pre-match party state used to tell menus/lobby/queue/
-// matchfound apart (the GLZ pregame/core-game checks only cover pregame/ingame).
+// matchfound apart (the GLZ pregame/core-game checks only cover pregame/ingame),
+// plus the lobby-management surface the phone drives (accessibility, invite code,
+// members + who owns the party).
 type PartyInfo struct {
-	State      string // DEFAULT|MATCHMAKING|MATCHMADE|CUSTOM_GAME_SETUP|…
-	QueueID    string // selected queue (empty in the bare main menu)
-	ReadyCheck string // ""|None|InProgress (InProgress = match found, ready-check up)
+	ID            string // party id (echoed; the caller already has it)
+	State         string // DEFAULT|MATCHMAKING|MATCHMADE|CUSTOM_GAME_SETUP|…
+	QueueID       string // selected queue (empty in the bare main menu)
+	ReadyCheck    string // ""|None|InProgress (InProgress = match found, ready-check up)
+	Accessibility string // OPEN|CLOSED
+	InviteCode    string // "" when no code is active
+	MaxMembers    int    // party size cap (MaxPartySize)
+	// QueueEntryMillis is when matchmaking started (unix millis), for the phone's
+	// search timer. 0 when not queuing (Riot sends a zero time outside the queue).
+	QueueEntryMillis int64
+	Members          []PartyMember
+}
+
+// PartyMember is one seat in the pre-match party (distinct from a pregame
+// Teammate: there's no agent here, but there is ownership + ready state).
+type PartyMember struct {
+	PUUID     string
+	IsOwner   bool
+	IsReady   bool
+	Tier      int  // current competitive tier (0 = unranked)
+	Incognito bool // streamer mode — honor by redacting name
 }
 
 // CurrentParty returns the player's current party id (everyone is always in a
@@ -179,27 +199,122 @@ func (c *Client) CurrentParty(ctx context.Context) (string, error) {
 	return r.CurrentPartyID, nil
 }
 
-// Party fetches a party's matchmaking + ready-check state. Undocumented and
-// patch-fragile (the ReadyCheck path especially) → callers parse defensively
-// and degrade to plain "menus" on any failure.
+// Party fetches a party's matchmaking + ready-check state plus the lobby surface
+// (accessibility, invite code, members). Undocumented and patch-fragile (the
+// ReadyCheck path especially) → callers parse defensively and degrade to plain
+// "menus" on any failure.
 func (c *Client) Party(ctx context.Context, id string) (PartyInfo, error) {
 	var r struct {
+		ID              string `json:"ID"`
 		State           string `json:"State"`
+		Accessibility   string `json:"Accessibility"`
+		InviteCode      string `json:"InviteCode"`
+		MaxPartySize    int    `json:"MaxPartySize"`
+		QueueEntryTime  string `json:"QueueEntryTime"` // ISO 8601; zero-time when idle
 		MatchmakingData struct {
 			QueueID    string `json:"QueueID"`
 			ReadyCheck struct {
 				State string `json:"State"`
 			} `json:"ReadyCheck"`
 		} `json:"MatchmakingData"`
+		Members []struct {
+			Subject         string `json:"Subject"`
+			IsOwner         bool   `json:"IsOwner"`
+			IsReady         bool   `json:"IsReady"`
+			CompetitiveTier int    `json:"CompetitiveTier"`
+			PlayerIdentity  struct {
+				Incognito bool `json:"Incognito"`
+			} `json:"PlayerIdentity"`
+		} `json:"Members"`
 	}
 	if err := c.glz(ctx, "GET", c.glzURL("/parties/v1/parties/"+id), &r); err != nil {
 		return PartyInfo{}, err
 	}
-	return PartyInfo{
-		State:      r.State,
-		QueueID:    r.MatchmakingData.QueueID,
-		ReadyCheck: r.MatchmakingData.ReadyCheck.State,
-	}, nil
+	pi := PartyInfo{
+		ID:            r.ID,
+		State:         r.State,
+		QueueID:       r.MatchmakingData.QueueID,
+		ReadyCheck:    r.MatchmakingData.ReadyCheck.State,
+		Accessibility: r.Accessibility,
+		InviteCode:    r.InviteCode,
+		MaxMembers:    r.MaxPartySize,
+	}
+	// Riot sends a zero time ("0001-01-01T…") when not queuing — guard on the year.
+	if t, err := time.Parse(time.RFC3339, r.QueueEntryTime); err == nil && t.Year() > 1 {
+		pi.QueueEntryMillis = t.UnixMilli()
+	}
+	for _, m := range r.Members {
+		pi.Members = append(pi.Members, PartyMember{
+			PUUID:     m.Subject,
+			IsOwner:   m.IsOwner,
+			IsReady:   m.IsReady,
+			Tier:      m.CompetitiveTier,
+			Incognito: m.PlayerIdentity.Incognito,
+		})
+	}
+	return pi, nil
+}
+
+// ---- party management (GLZ) ----------------------------------------------
+//
+// The lobby surface the phone drives. These mirror normal Riot-client actions
+// (not the instalock select/lock), so the ban posture is far lighter — but they
+// are still automation. Each returns just an error; callers trigger a re-poll so
+// the next pushed state reflects the change (the Party read above is the truth).
+// Owner-only operations (matchmaking, queue, accessibility, code, kick) are gated
+// by the caller against the owner flag; Riot also rejects them server-side.
+
+// GenerateInviteCode (re)generates the party's 6-char invite code.
+func (c *Client) GenerateInviteCode(ctx context.Context, id string) error {
+	return c.glz(ctx, "POST", c.glzURL("/parties/v1/parties/"+id+"/invitecode"), nil)
+}
+
+// DisableInviteCode clears the party's invite code.
+func (c *Client) DisableInviteCode(ctx context.Context, id string) error {
+	return c.glz(ctx, "DELETE", c.glzURL("/parties/v1/parties/"+id+"/invitecode"), nil)
+}
+
+// JoinByCode joins the party that owns code (any player; not owner-gated).
+func (c *Client) JoinByCode(ctx context.Context, code string) error {
+	return c.glz(ctx, "POST", c.glzURL("/parties/v1/players/joinbycode/"+code), nil)
+}
+
+// LeaveParty removes the local player from their party (Riot re-creates a fresh
+// solo party). DELETE on our own puuid; any player can leave.
+func (c *Client) LeaveParty(ctx context.Context) error {
+	return c.glz(ctx, "DELETE", c.glzURL("/parties/v1/players/"+c.auth.PUUID), nil)
+}
+
+// KickMember removes another player from the party (owner-only). Same endpoint as
+// LeaveParty, just a different subject.
+func (c *Client) KickMember(ctx context.Context, puuid string) error {
+	return c.glz(ctx, "DELETE", c.glzURL("/parties/v1/players/"+puuid), nil)
+}
+
+// SetAccessibility flips the party between OPEN (anyone can join) and CLOSED.
+func (c *Client) SetAccessibility(ctx context.Context, id string, open bool) error {
+	acc := "CLOSED"
+	if open {
+		acc = "OPEN"
+	}
+	return c.glzBody(ctx, "POST", c.glzURL("/parties/v1/parties/"+id+"/accessibility"),
+		map[string]string{"accessibility": acc}, nil)
+}
+
+// ChangeQueue sets the matchmaking queue (e.g. "competitive", "unrated").
+func (c *Client) ChangeQueue(ctx context.Context, id, queueID string) error {
+	return c.glzBody(ctx, "POST", c.glzURL("/parties/v1/parties/"+id+"/queue"),
+		map[string]string{"queueID": queueID}, nil)
+}
+
+// StartMatchmaking enters the selected queue (owner-only).
+func (c *Client) StartMatchmaking(ctx context.Context, id string) error {
+	return c.glz(ctx, "POST", c.glzURL("/parties/v1/parties/"+id+"/matchmaking/join"), nil)
+}
+
+// StopMatchmaking leaves the queue (owner-only).
+func (c *Client) StopMatchmaking(ctx context.Context, id string) error {
+	return c.glz(ctx, "POST", c.glzURL("/parties/v1/parties/"+id+"/matchmaking/leave"), nil)
 }
 
 // InCoreGame reports whether the player is in an active match. ErrNotFound → no.

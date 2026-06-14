@@ -20,6 +20,8 @@ import { RoleFilter } from "@/components/RoleFilter";
 import { AgentGrid } from "@/components/AgentGrid";
 import { AlliesStrip } from "@/components/AlliesStrip";
 import { ActionBar } from "@/components/ActionBar";
+import { PartyBar } from "@/components/PartyBar";
+import { PartyDrawer } from "@/components/PartyDrawer";
 import { Pairing } from "@/components/Pairing";
 import { StateScreen } from "@/components/StateScreen";
 import { Scoreboard } from "@/components/Scoreboard";
@@ -32,6 +34,10 @@ const CONTROLLER_STATES = new Set([
   "pregame",
   "locked",
 ]);
+
+// Pre-match states own the party (lobby) surface; pregame/locked switch the strip
+// slot back to the read-only allies view.
+const PREMATCH_STATES = new Set(["menus", "lobby", "queue", "matchfound"]);
 
 export default function App() {
   const [creds, setCreds] = useState<Creds | null>(() => loadCreds());
@@ -52,6 +58,15 @@ export default function App() {
   const [roleFilter, setRoleFilter] = useState<string | null>(null);
   const [pendingLock, setPendingLock] = useState(false);
   const [recents, setRecents] = useState<string[]>(loadRecents);
+  const [partyOpen, setPartyOpen] = useState(false);
+
+  // The party drawer only belongs to pre-match states; close it on any exit so it
+  // can't linger over agent select. Also close the moment a match is found — the
+  // ready-check takes over and there's nothing left to manage.
+  const preMatch = !!game && PREMATCH_STATES.has(game.state);
+  useEffect(() => {
+    if (!preMatch || game?.state === "matchfound") setPartyOpen(false);
+  }, [preMatch, game?.state]);
 
   // Re-resolve language when the game locale arrives, unless the user chose one.
   useEffect(() => {
@@ -156,8 +171,18 @@ export default function App() {
               lang={lang}
             />
           </div>
-          {game.teammates.length > 0 && (
-            <AlliesStrip teammates={game.teammates} catalog={catalog} lang={lang} />
+          {preMatch && game.party_id ? (
+            <PartyBar
+              game={game}
+              catalog={catalog}
+              lang={lang}
+              onOpen={() => setPartyOpen(true)}
+              onCancelSearch={() => relay.party.stopMatchmaking()}
+            />
+          ) : (
+            game.teammates.length > 0 && (
+              <AlliesStrip teammates={game.teammates} catalog={catalog} lang={lang} />
+            )
           )}
           <ActionBar
             game={game}
@@ -169,6 +194,16 @@ export default function App() {
             onDisarm={onDisarm}
             onToggleAutoLock={onToggleAutoLock}
           />
+          {preMatch && game.party_id && (
+            <PartyDrawer
+              open={partyOpen}
+              onClose={() => setPartyOpen(false)}
+              game={game}
+              catalog={catalog}
+              lang={lang}
+              party={relay.party}
+            />
+          )}
         </>
       ) : game && game.state === "ingame" && game.match_players.length > 0 ? (
         <Scoreboard players={game.match_players} catalog={catalog} lang={lang} />

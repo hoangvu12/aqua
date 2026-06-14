@@ -27,6 +27,28 @@ type Snapshot struct {
 	Players              []PlayerSlot // ally team during pregame
 	OwnedAgents          []string
 	Locale               string
+
+	// Party (lobby) surface — populated in the pre-match states only.
+	PartyID          string
+	Accessibility    string // OPEN|CLOSED
+	InviteCode       string
+	MaxPartySize     int
+	IsOwner          bool  // the local player owns the party
+	QueueEntryMillis int64 // matchmaking start (unix millis), 0 when not queuing
+	PartyMembers     []PartySlot
+}
+
+// PartySlot is one pre-match party member (the snapshot view; the wire shape is
+// picker.PartyMember in state.go). Distinct from PlayerSlot: no agent, but it
+// carries ownership + ready state.
+type PartySlot struct {
+	PUUID   string
+	Name    string
+	IsOwner bool
+	IsReady bool
+	Self    bool
+	Tier    int
+	Stats   *riot.PlayerStats
 }
 
 // PlayerSlot is one player the game put in front of us — an ally seat in agent
@@ -48,6 +70,18 @@ type Source interface {
 	Lock(ctx context.Context, matchID, agentID string) error
 	Authenticate(ctx context.Context) error // force a fresh auth (test_auth)
 	PUUID() string
+
+	// Party (lobby) management. id is the current party id; owner-only operations
+	// are gated by the picker before these are called.
+	GenerateInviteCode(ctx context.Context, id string) error
+	DisableInviteCode(ctx context.Context, id string) error
+	JoinByCode(ctx context.Context, code string) error
+	LeaveParty(ctx context.Context) error
+	KickMember(ctx context.Context, puuid string) error
+	SetAccessibility(ctx context.Context, id string, open bool) error
+	ChangeQueue(ctx context.Context, id, queueID string) error
+	StartMatchmaking(ctx context.Context, id string) error
+	StopMatchmaking(ctx context.Context, id string) error
 }
 
 // riotSource adapts the riot.Client to Source with lazy, self-healing auth.
@@ -206,14 +240,51 @@ func (s *riotSource) snapshotLocked(ctx context.Context) (Snapshot, error) {
 	}
 
 	// Pre-match menus territory. Refine menus/lobby/queue/matchfound from the
-	// party (best-effort; the plan says degrade to plain "menus" if it breaks).
-	phase, queueID := "menus", ""
+	// party (best-effort; the plan says degrade to plain "menus" if it breaks),
+	// and carry the lobby surface (members, code, accessibility) for the phone.
+	snap := Snapshot{Running: true, Phase: "menus", OwnedAgents: s.owned, Locale: c.Locale()}
 	if pid, perr := c.CurrentParty(ctx); perr == nil && pid != "" {
 		if pi, perr := c.Party(ctx, pid); perr == nil {
-			phase, queueID = partyPhase(pi)
+			snap.Phase, snap.QueueID = partyPhase(pi)
+			snap.PartyID = pid
+			snap.Accessibility = pi.Accessibility
+			snap.InviteCode = pi.InviteCode
+			snap.MaxPartySize = pi.MaxMembers
+			snap.QueueEntryMillis = pi.QueueEntryMillis
+			puuids := make([]string, 0, len(pi.Members))
+			for _, m := range pi.Members {
+				self := m.PUUID == c.PUUID()
+				if self {
+					snap.IsOwner = m.IsOwner
+				}
+				snap.PartyMembers = append(snap.PartyMembers, PartySlot{
+					PUUID: m.PUUID, IsOwner: m.IsOwner, IsReady: m.IsReady, Self: self, Tier: m.Tier,
+				})
+				puuids = append(puuids, m.PUUID)
+			}
+			attachPartyStats(snap.PartyMembers, s.lobbyStats(c, pid, snap.QueueID, puuids))
 		}
 	}
-	return Snapshot{Running: true, Phase: phase, QueueID: queueID, OwnedAgents: s.owned, Locale: c.Locale()}, nil
+	return snap, nil
+}
+
+// attachPartyStats fills each member's Name + Stats from a (possibly empty) stats
+// map (the party-member counterpart of attachStats for PlayerSlot).
+func attachPartyStats(members []PartySlot, stats map[string]riot.PlayerStats) {
+	for i := range members {
+		st, ok := stats[members[i].PUUID]
+		if !ok {
+			continue
+		}
+		cp := st
+		members[i].Stats = &cp
+		if members[i].Name == "" {
+			members[i].Name = st.Name
+		}
+		if members[i].Tier == 0 {
+			members[i].Tier = st.Tier
+		}
+	}
 }
 
 // lobbyStats returns cached tracker rows for the given match, kicking off a
@@ -329,4 +400,44 @@ func (s *riotSource) Lock(ctx context.Context, matchID, agentID string) error {
 		return errors.New("not authenticated")
 	}
 	return c.Lock(ctx, matchID, agentID)
+}
+
+// withClient runs fn against the live client (or errors if not authenticated),
+// the shared shape for the party actions below (mirrors Select/Lock locking).
+func (s *riotSource) withClient(fn func(*riot.Client) error) error {
+	s.mu.Lock()
+	c := s.client
+	s.mu.Unlock()
+	if c == nil {
+		return errors.New("not authenticated")
+	}
+	return fn(c)
+}
+
+func (s *riotSource) GenerateInviteCode(ctx context.Context, id string) error {
+	return s.withClient(func(c *riot.Client) error { return c.GenerateInviteCode(ctx, id) })
+}
+func (s *riotSource) DisableInviteCode(ctx context.Context, id string) error {
+	return s.withClient(func(c *riot.Client) error { return c.DisableInviteCode(ctx, id) })
+}
+func (s *riotSource) JoinByCode(ctx context.Context, code string) error {
+	return s.withClient(func(c *riot.Client) error { return c.JoinByCode(ctx, code) })
+}
+func (s *riotSource) LeaveParty(ctx context.Context) error {
+	return s.withClient(func(c *riot.Client) error { return c.LeaveParty(ctx) })
+}
+func (s *riotSource) KickMember(ctx context.Context, puuid string) error {
+	return s.withClient(func(c *riot.Client) error { return c.KickMember(ctx, puuid) })
+}
+func (s *riotSource) SetAccessibility(ctx context.Context, id string, open bool) error {
+	return s.withClient(func(c *riot.Client) error { return c.SetAccessibility(ctx, id, open) })
+}
+func (s *riotSource) ChangeQueue(ctx context.Context, id, queueID string) error {
+	return s.withClient(func(c *riot.Client) error { return c.ChangeQueue(ctx, id, queueID) })
+}
+func (s *riotSource) StartMatchmaking(ctx context.Context, id string) error {
+	return s.withClient(func(c *riot.Client) error { return c.StartMatchmaking(ctx, id) })
+}
+func (s *riotSource) StopMatchmaking(ctx context.Context, id string) error {
+	return s.withClient(func(c *riot.Client) error { return c.StopMatchmaking(ctx, id) })
 }

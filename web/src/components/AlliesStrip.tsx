@@ -98,37 +98,42 @@ function Seat({ tm, catalog, lang }: { tm: Teammate; catalog: Catalog | null; la
 
   return (
     <div className="flex min-w-0 flex-col items-center gap-1">
-      <div
-        className={cn(
-          "relative grid h-11 w-11 place-items-center overflow-hidden rounded-full border bg-surface",
-          // Ring: self is always accent-tinted; allies use neutral tiers.
-          tm.self
-            ? locked
-              ? "border-2 border-accent"
-              : "border-dashed border-accent/55"
-            : locked
-              ? "border-fg-mute"
-              : "border-dashed border-hairline",
-          // Opacity by certainty: locked = committed, selected = tentative, empty = absent.
-          locked ? "opacity-100" : selected ? "opacity-75" : "opacity-50",
-        )}
-      >
-        {agent?.displayIcon ? (
-          <img
-            src={agent.displayIcon}
-            alt={agent.displayName}
-            className={cn("h-full w-full object-cover", !locked && "grayscale-[0.3]")}
-          />
-        ) : (
-          <span className="h-2 w-2 rounded-full bg-fg-mute" />
-        )}
+      {/* Non-clipping wrapper: the avatar clips the art to a circle, but the status
+          badge is a sibling layered on top so its overhang is never cut off. */}
+      <div className="relative">
+        <div
+          className={cn(
+            "grid h-11 w-11 place-items-center overflow-hidden rounded-full border bg-surface",
+            // Ring: self is always accent-tinted; allies use neutral tiers.
+            tm.self
+              ? locked
+                ? "border-2 border-accent"
+                : "border-dashed border-accent/55"
+              : locked
+                ? "border-fg-mute"
+                : "border-dashed border-hairline",
+            // Opacity by certainty: locked = committed, selected = tentative, empty = absent.
+            locked ? "opacity-100" : selected ? "opacity-75" : "opacity-50",
+          )}
+        >
+          {agent?.displayIcon ? (
+            <img
+              src={agent.displayIcon}
+              alt={agent.displayName}
+              className={cn("h-full w-full object-cover", !locked && "grayscale-[0.3]")}
+            />
+          ) : (
+            <span className="h-2 w-2 rounded-full bg-fg-mute" />
+          )}
+        </div>
 
-        {/* Locked → check badge (committed). Self uses the accent; allies stay neutral. */}
+        {/* Locked → check badge (committed). Self uses the accent; allies stay
+            neutral. ring-2 ring-bg lifts it off the avatar edge. */}
         {locked && (
           <span
             className={cn(
-              "absolute -bottom-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full",
-              tm.self ? "bg-accent text-on-accent" : "bg-bg text-fg-dim",
+              "absolute -bottom-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full ring-2 ring-bg",
+              tm.self ? "bg-accent text-on-accent" : "bg-surface-hi text-fg-dim",
             )}
           >
             <Check className="h-2.5 w-2.5" strokeWidth={3} />

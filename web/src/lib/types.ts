@@ -44,6 +44,21 @@ export interface Teammate {
   stats?: PlayerStats | null;
 }
 
+/** Party accessibility: OPEN = anyone with the code joins, CLOSED = invite only.
+ * "" before the party state resolves. */
+export type PartyAccessibility = "OPEN" | "CLOSED" | "";
+
+/** One seat in the pre-match party (lobby). Distinct from Teammate: no agent, but
+ * carries ownership + ready state. `puuid` is the kick target. */
+export interface PartyMember {
+  puuid: string;
+  name: string;
+  is_owner: boolean;
+  is_ready: boolean;
+  self: boolean;
+  stats?: PlayerStats | null;
+}
+
 /** One row in the live-match scoreboard (both teams). */
 export interface MatchSeat {
   name: string;
@@ -74,6 +89,17 @@ export interface GameStateMsg {
    * on the PC and renders correctly on cold-start. status ∈ ""|selected|locked. */
   self_agent_uuid: string;
   self_status: "" | "selected" | "locked";
+  /** Party (lobby) surface; populated only in pre-match states (menus|lobby|
+   * queue|matchfound). Drives the party drawer. */
+  party_id: string;
+  party_accessibility: PartyAccessibility;
+  party_invite_code: string;
+  party_max_size: number;
+  is_party_owner: boolean;
+  /** When matchmaking started (unix millis); 0 when not queuing. Drives the
+   * search timer. */
+  queue_entry_time: number;
+  party_members: PartyMember[];
 }
 
 /** Relay envelope: every WS frame is { type, reqId?, data }. */

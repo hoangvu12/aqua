@@ -25,6 +25,14 @@ export function formatCountdown(ns: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+/** Milliseconds → "M:SS", clamped at 0 (the matchmaking search timer). */
+export function formatElapsed(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 /** Short, stable request id for correlating select/lock results. */
 let reqCounter = 0;
 export function nextReqId(): string {

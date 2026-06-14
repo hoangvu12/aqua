@@ -25,6 +25,28 @@ type State struct {
 	// phone reflects picks made on the PC and renders correctly on cold-start.
 	SelfAgentUUID string `json:"self_agent_uuid"`
 	SelfStatus    string `json:"self_status"` // ""|selected|locked
+
+	// Party (lobby) surface — populated in the pre-match states (menus|lobby|
+	// queue|matchfound), empty otherwise. Drives the phone's party drawer.
+	PartyID            string        `json:"party_id"`
+	PartyAccessibility string        `json:"party_accessibility"` // OPEN|CLOSED|""
+	PartyInviteCode    string        `json:"party_invite_code"`
+	PartyMaxSize       int           `json:"party_max_size"`
+	IsPartyOwner       bool          `json:"is_party_owner"`
+	QueueEntryTime     int64         `json:"queue_entry_time"` // unix millis, 0 when not queuing
+	PartyMembers       []PartyMember `json:"party_members"`
+}
+
+// PartyMember is one seat in the pre-match party (the wire view). Self marks the
+// local player; IsOwner marks the seat that can run owner-only actions. PUUID is
+// the kick target (owner-only; safe to expose in the owner's own party).
+type PartyMember struct {
+	PUUID   string            `json:"puuid"`
+	Name    string            `json:"name"`
+	IsOwner bool              `json:"is_owner"`
+	IsReady bool              `json:"is_ready"`
+	Self    bool              `json:"self"`
+	Stats   *riot.PlayerStats `json:"stats,omitempty"`
 }
 
 // Teammate is one ally-team seat as shown in the allies strip. Self marks the

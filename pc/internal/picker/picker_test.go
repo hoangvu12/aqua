@@ -32,6 +32,18 @@ func (f *fakeSource) Lock(_ context.Context, _, a string) error {
 func (f *fakeSource) Authenticate(context.Context) error { return nil }
 func (f *fakeSource) PUUID() string                      { return f.puuid }
 
+// Party actions are no-ops for the picker unit tests (the owner-gating logic
+// lives in the picker, not the source).
+func (f *fakeSource) GenerateInviteCode(context.Context, string) error      { return nil }
+func (f *fakeSource) DisableInviteCode(context.Context, string) error       { return nil }
+func (f *fakeSource) JoinByCode(context.Context, string) error              { return nil }
+func (f *fakeSource) LeaveParty(context.Context) error                      { return nil }
+func (f *fakeSource) KickMember(context.Context, string) error              { return nil }
+func (f *fakeSource) SetAccessibility(context.Context, string, bool) error  { return nil }
+func (f *fakeSource) ChangeQueue(context.Context, string, string) error     { return nil }
+func (f *fakeSource) StartMatchmaking(context.Context, string) error        { return nil }
+func (f *fakeSource) StopMatchmaking(context.Context, string) error         { return nil }
+
 type capSink struct{ states []State }
 
 func (c *capSink) SendState(s State)               { c.states = append(c.states, s) }

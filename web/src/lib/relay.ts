@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AuthStatusData, Frame, GameStateMsg, ResultData } from "./types";
 import { RELAY_WS_BASE, type Creds } from "./pair";
 import { nextReqId } from "./utils";
@@ -26,6 +26,21 @@ export interface Relay {
   lock: (agentId: string) => Promise<ResultData>;
   setConfig: (args: SetConfigArgs) => Promise<ResultData>;
   getState: () => void;
+  /** Party (lobby) management. Owner-only ops are also gated by the PC. */
+  party: PartyActions;
+}
+
+/** Phone→PC party commands. Each resolves with the PC's ok/message result. */
+export interface PartyActions {
+  generateCode: () => Promise<ResultData>;
+  disableCode: () => Promise<ResultData>;
+  joinByCode: (code: string) => Promise<ResultData>;
+  leave: () => Promise<ResultData>;
+  kick: (puuid: string) => Promise<ResultData>;
+  setAccessibility: (open: boolean) => Promise<ResultData>;
+  setQueue: (queueId: string) => Promise<ResultData>;
+  startMatchmaking: () => Promise<ResultData>;
+  stopMatchmaking: () => Promise<ResultData>;
 }
 
 interface Pending {
@@ -159,5 +174,21 @@ export function useRelay(creds: Creds | null, onAuthInvalid: () => void): Relay 
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "get_state" }));
   }, []);
 
-  return { conn, game, gotState, select, lock, setConfig, getState };
+  const party = useMemo<PartyActions>(
+    () => ({
+      generateCode: () => command("party_generate_code", {}),
+      disableCode: () => command("party_disable_code", {}),
+      joinByCode: (code: string) => command("party_join_by_code", { code }),
+      leave: () => command("party_leave", {}),
+      kick: (puuid: string) => command("party_kick", { puuid }),
+      setAccessibility: (open: boolean) =>
+        command("party_set_accessibility", { accessibility: open ? "OPEN" : "CLOSED" }),
+      setQueue: (queueId: string) => command("party_set_queue", { queueId }),
+      startMatchmaking: () => command("party_start_matchmaking", {}),
+      stopMatchmaking: () => command("party_stop_matchmaking", {}),
+    }),
+    [command],
+  );
+
+  return { conn, game, gotState, select, lock, setConfig, getState, party };
 }

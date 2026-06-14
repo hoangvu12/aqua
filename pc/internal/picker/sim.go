@@ -80,6 +80,12 @@ type simSource struct {
 	ourAgent string
 	ourState string // ""|selected|locked
 	lockedAt int
+
+	// Party (lobby) sim state, mutated by the party actions so the phone's drawer
+	// reflects taps. Self is the owner so every owner-only control is exercisable.
+	inviteCode string
+	closed     bool
+	queue      string
 }
 
 // NewSimSource returns a scripted game source for testing.
@@ -96,16 +102,43 @@ func (s *simSource) Snapshot(context.Context) (Snapshot, error) {
 
 	owned := []string{simTakenUUID, simJettUUID, s.ourAgent}
 
+	// A fake party (self = owner + one ally) carried across every pre-match rung,
+	// so the lobby drawer renders and its actions have something to mutate.
+	q := s.queue
+	if q == "" {
+		q = "competitive"
+	}
+	acc := "OPEN"
+	if s.closed {
+		acc = "CLOSED"
+	}
+	party := func(phase string) Snapshot {
+		queue := q
+		if phase == "menus" {
+			queue = ""
+		}
+		return Snapshot{
+			Running: true, Phase: phase, QueueID: queue, Locale: "vi-VN", OwnedAgents: owned,
+			PartyID: "sim-party", IsOwner: true, Accessibility: acc, InviteCode: s.inviteCode, MaxPartySize: 5,
+			PartyMembers: []PartySlot{
+				{PUUID: simSelfPUUID, Name: "You", IsOwner: true, Self: true, Tier: 19,
+					Stats: simStat("You", 19, 24, 1.21, 158, 28.0, 52, []bool{true, false, true, true, false})},
+				{PUUID: "sim-ally-1", Name: "wazuu#1406", Tier: 19,
+					Stats: simStat("wazuu#1406", 19, 20, 1.46, 194, 22.0, 45, []bool{true, true, false, true, true})},
+			},
+		}
+	}
+
 	// Pre-match ladder (2 ticks per rung) before agent select opens.
 	switch {
 	case s.tick <= 2:
-		return Snapshot{Running: true, Phase: "menus", Locale: "vi-VN", OwnedAgents: owned}, nil
+		return party("menus"), nil
 	case s.tick <= 4:
-		return Snapshot{Running: true, Phase: "lobby", QueueID: "competitive", Locale: "vi-VN", OwnedAgents: owned}, nil
+		return party("lobby"), nil
 	case s.tick <= 6:
-		return Snapshot{Running: true, Phase: "queue", QueueID: "competitive", Locale: "vi-VN", OwnedAgents: owned}, nil
+		return party("queue"), nil
 	case s.tick <= 8:
-		return Snapshot{Running: true, Phase: "matchfound", QueueID: "competitive", Locale: "vi-VN", OwnedAgents: owned}, nil
+		return party("matchfound"), nil
 	}
 
 	if s.ourState == "locked" && s.tick > s.lockedAt+3 {
@@ -147,3 +180,35 @@ func (s *simSource) Lock(_ context.Context, _, agentID string) error {
 	s.ourAgent, s.ourState, s.lockedAt = agentID, "locked", s.tick
 	return nil
 }
+
+// ---- party actions (mutate sim state so the drawer reflects taps) ----------
+
+func (s *simSource) GenerateInviteCode(context.Context, string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inviteCode = "SIM42"
+	return nil
+}
+func (s *simSource) DisableInviteCode(context.Context, string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inviteCode = ""
+	return nil
+}
+func (s *simSource) SetAccessibility(_ context.Context, _ string, open bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = !open
+	return nil
+}
+func (s *simSource) ChangeQueue(_ context.Context, _, queueID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.queue = queueID
+	return nil
+}
+func (s *simSource) JoinByCode(context.Context, string) error      { return nil }
+func (s *simSource) LeaveParty(context.Context) error              { return nil }
+func (s *simSource) KickMember(context.Context, string) error      { return nil }
+func (s *simSource) StartMatchmaking(context.Context, string) error { return nil }
+func (s *simSource) StopMatchmaking(context.Context, string) error  { return nil }
