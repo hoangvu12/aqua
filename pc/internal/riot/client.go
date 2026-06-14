@@ -396,6 +396,14 @@ func (c *Client) Lock(ctx context.Context, matchID, agentID string) error {
 	return c.glz(ctx, "POST", c.glzURL("/pregame/v1/matches/"+matchID+"/lock/"+agentID), nil)
 }
 
+// QuitPregame quits agent select for the match — the API-level "dodge". The
+// in-game client has no button for this (you'd otherwise idle out the timer
+// without picking), but the endpoint leaves immediately and Riot applies the
+// normal dodge penalty (lost RR + a short queue restriction in competitive).
+func (c *Client) QuitPregame(ctx context.Context, matchID string) error {
+	return c.glz(ctx, "POST", c.glzURL("/pregame/v1/matches/"+matchID+"/quit"), nil)
+}
+
 // OwnedAgents returns the UUIDs of agents the player can play: the free starter
 // agents (always available) unioned with the store entitlements (acquired ones).
 // The entitlements endpoint omits the defaults, so they're added explicitly.

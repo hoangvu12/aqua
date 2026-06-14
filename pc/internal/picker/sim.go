@@ -47,13 +47,28 @@ const (
 	simRazeUUID      = "f94c3b30-42be-e959-889c-5aa313dba261"
 )
 
+// Real valorant-api skin renders so the -sim scoreboard exercises the equipped-
+// skins strip (media host; the phone rewrites it to /cdn in production).
+const simMedia = "https://media.valorant-api.com/weaponskins/"
+
+var simSkinsSelf = []SeatSkin{
+	{Weapon: "Vandal", Name: "Prelude to Chaos Vandal", Image: simMedia + "522a264e-4ca7-adb0-6cf1-28b2ef938727/displayicon.png"},
+	{Weapon: "Operator", Name: "RGX 11z Pro Operator", Image: simMedia + "2e1936ed-4582-628f-da9c-25a7f47323cc/displayicon.png"},
+	{Weapon: "Knife", Name: "Reaver Karambit", Image: simMedia + "b73d7b16-4652-bc5b-5c4c-068aabb19d0a/displayicon.png"},
+}
+
+var simSkinsAlly = []SeatSkin{
+	{Weapon: "Phantom", Name: "Recon Phantom", Image: simMedia + "d67b929f-4431-61c0-286e-3ebf3d11c4af/displayicon.png"},
+	{Weapon: "Vandal", Name: "Primordium Vandal", Image: simMedia + "a70fd508-44ea-8de3-3b30-d3a7eb9db42e/displayicon.png"},
+}
+
 // simScoreboard is a fixed 10-player live match (5 ally + 5 enemy) for -sim, so
 // the in-match scoreboard renders without a real game. Self is first.
 func simScoreboard(selfAgent string) []PlayerSlot {
 	return []PlayerSlot{
-		{PUUID: simSelfPUUID, CharacterID: selfAgent, Team: "ally", Name: "You",
+		{PUUID: simSelfPUUID, CharacterID: selfAgent, Team: "ally", Name: "You", Skins: simSkinsSelf,
 			Stats: simStat("You", 19, 24, 1.21, 158, 28.0, 52, []bool{true, false, true, true, false})},
-		{PUUID: "sim-a1", CharacterID: simReynaUUID, Team: "ally", Name: "wazuu#1406",
+		{PUUID: "sim-a1", CharacterID: simReynaUUID, Team: "ally", Name: "wazuu#1406", Skins: simSkinsAlly,
 			Stats: simStat("wazuu#1406", 19, 20, 1.46, 194, 22.0, 45, []bool{true, true, false, true, true})},
 		{PUUID: "sim-a2", CharacterID: simBrimstoneUUID, Team: "ally", Name: "BrimstonMimstone#NA1",
 			Stats: simStat("BrimstonMimstone#NA1", 14, 16, 0.57, 96, 9.1, 36, []bool{false, false, true, false, false})},
@@ -186,6 +201,16 @@ func (s *simSource) Lock(_ context.Context, _, agentID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ourAgent, s.ourState, s.lockedAt = agentID, "locked", s.tick
+	return nil
+}
+
+// Quit (dodge) drops us out of agent select. The sim models this by rewinding
+// the timeline to the pre-match menus, clearing our pick — exactly what a real
+// dodge does (back to the lobby, minus the penalty the sim doesn't fake).
+func (s *simSource) Quit(context.Context, string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tick, s.ourAgent, s.ourState, s.lockedAt = 0, "", "", 0
 	return nil
 }
 

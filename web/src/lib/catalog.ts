@@ -26,6 +26,16 @@ export function apiLanguage(gameLocale: string | undefined): string {
 
 const cacheKey = (lang: string) => `aqua_catalog_${lang}`;
 
+// Catalog JSON has its media host rewritten to /cdn by the Worker, but some art
+// (skin renders) arrives over the relay as raw valorant-api URLs. Rewrite those
+// the same way in prod so they load through our same-origin mirror; in dev (no
+// Worker) hit the media host directly.
+const MEDIA_HOST = "https://media.valorant-api.com";
+export function mediaUrl(url: string | undefined): string | undefined {
+  if (!url) return url;
+  return import.meta.env.PROD ? url.replace(MEDIA_HOST, "/cdn") : url;
+}
+
 async function fetchVersion(): Promise<string> {
   const res = await fetch(`${API}/version`);
   if (!res.ok) throw new Error(`version ${res.status}`);

@@ -25,7 +25,9 @@ You run one app on your PC; the phone side is just a web page, so there's nothin
    you only do this once. Add it to your home screen if you want it to feel like an app (it's a PWA).
 3. **Open VALORANT and play.** Aqua picks up whatever you're doing (lobby, queue, agent select, or
    in a match), so you can start it at any point. From your phone you can select and lock an agent,
-   or arm a pre-pick that fires the moment agent select opens.
+   or arm a pre-pick that fires the moment agent select opens. You can also **dodge** (quit agent
+   select) from the phone — the game has no button for this, so otherwise you'd have to idle out the
+   timer without picking. Dodging applies Riot's normal penalty (lost RR + a short queue ban).
 
 While `aqua.exe` is running, the console takes a few single-key commands:
 

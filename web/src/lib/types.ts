@@ -68,6 +68,13 @@ export interface PartyMember {
   stats?: PlayerStats | null;
 }
 
+/** One equipped skin shown in the scoreboard's expanded row. */
+export interface SeatSkin {
+  weapon: string; // "Vandal", "Knife", …
+  name: string; // "Prelude to Chaos Vandal"
+  image: string; // valorant-api render URL (rewritten to /cdn in prod)
+}
+
 /** One row in the live-match scoreboard (both teams). */
 export interface MatchSeat {
   name: string;
@@ -77,6 +84,9 @@ export interface MatchSeat {
   stats?: PlayerStats | null;
   /** Inferred premade group: 0 = none, 1..n = a detected party (per match). */
   party_group: number;
+  /** Equipped skins for a curated gun set; absent until the PC's loadout fetch
+   * resolves, empty when the player runs all default skins. */
+  skins?: SeatSkin[] | null;
 }
 
 /** The `state` object pushed by the PC. Fields are always present. */

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Check, Lock, ShieldAlert, X } from "lucide-react";
+import { type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
+import { Check, DoorOpen, Lock, ShieldAlert, X } from "lucide-react";
 import type { Agent, GameStateMsg } from "@/lib/types";
 import { t, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,7 @@ export function ActionBar({
   lang,
   pendingLock,
   onLock,
+  onDodge,
   onArm,
   onDisarm,
   onToggleAutoLock,
@@ -25,6 +26,7 @@ export function ActionBar({
   lang: Lang;
   pendingLock: boolean;
   onLock: () => void;
+  onDodge: () => void;
   onArm: () => void;
   onDisarm: () => void;
   onToggleAutoLock: () => void;
@@ -58,6 +60,9 @@ export function ActionBar({
           onToggleAutoLock={onToggleAutoLock}
         />
       )}
+      {/* Dodge is reachable through all of agent select (including after a lock) —
+          the game itself has no such button, so this is the only way out. */}
+      {(isLocked || inPregame) && <DodgeBar lang={lang} onDodge={onDodge} />}
     </footer>
   );
 }
@@ -126,28 +131,17 @@ function PregameRow({
 }
 
 /**
- * Hold-to-lock: the signature gesture (DESIGN.md §Motion). Press and hold ~600ms
- * and an accent fill sweeps left→right; at full it auto-commits the lock. Release
- * before it fills cancels cleanly. transform/opacity only, and reduced-motion
- * users simply get an instant fill (the global override) while the hold timer
- * still gates the action.
+ * Hold-to-commit gesture (DESIGN.md §Motion). Press and hold HOLD_MS and a fill
+ * sweeps left→right; at full it auto-fires. Release before it fills cancels
+ * cleanly. Shared by hold-to-lock and hold-to-dodge — both committal actions that
+ * shouldn't fire on a stray tap. Returns the holding flag plus the pointer
+ * handlers to spread onto the button.
  */
 const HOLD_MS = 600;
 
-function HoldLockButton({
-  agent,
-  lang,
-  locking,
-  onLock,
-}: {
-  agent: Agent | undefined;
-  lang: Lang;
-  locking: boolean;
-  onLock: () => void;
-}) {
+function useHold(onFire: () => void, disabled: boolean) {
   const [holding, setHolding] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const disabled = !agent || locking;
 
   const clear = () => {
     if (timer.current) {
@@ -160,7 +154,7 @@ function HoldLockButton({
     setHolding(true);
     timer.current = setTimeout(() => {
       setHolding(false);
-      onLock();
+      onFire();
     }, HOLD_MS);
   };
   const cancel = () => {
@@ -169,15 +163,37 @@ function HoldLockButton({
   };
   useEffect(() => clear, []);
 
+  return {
+    holding,
+    handlers: {
+      onPointerDown: start,
+      onPointerUp: cancel,
+      onPointerLeave: cancel,
+      onPointerCancel: cancel,
+      onContextMenu: (e: ReactMouseEvent) => e.preventDefault(),
+    },
+  };
+}
+
+function HoldLockButton({
+  agent,
+  lang,
+  locking,
+  onLock,
+}: {
+  agent: Agent | undefined;
+  lang: Lang;
+  locking: boolean;
+  onLock: () => void;
+}) {
+  const disabled = !agent || locking;
+  const { holding, handlers } = useHold(onLock, disabled);
+
   return (
     <button
       type="button"
       disabled={disabled}
-      onPointerDown={start}
-      onPointerUp={cancel}
-      onPointerLeave={cancel}
-      onPointerCancel={cancel}
-      onContextMenu={(e) => e.preventDefault()}
+      {...handlers}
       aria-label={t(lang, "holdToLock")}
       style={{ touchAction: "none" }}
       className={cn(
@@ -204,6 +220,56 @@ function HoldLockButton({
         {locking ? t(lang, "locking") : t(lang, "holdToLock")}
       </span>
     </button>
+  );
+}
+
+/**
+ * Hold-to-dodge: a slim, full-width sibling of the lock button, in caution amber
+ * (vs the accent lock) since quitting agent select costs RR + a queue ban. Once
+ * fired it shows "Dodging…" until the PC pushes the post-dodge state (which
+ * unmounts this row), so the same hold can't fire twice.
+ */
+function DodgeBar({ lang, onDodge }: { lang: Lang; onDodge: () => void }) {
+  const [dodging, setDodging] = useState(false);
+  const fire = () => {
+    setDodging(true);
+    onDodge();
+  };
+  const { holding, handlers } = useHold(fire, dodging);
+
+  return (
+    <div className="mt-3 space-y-1.5">
+      <button
+        type="button"
+        disabled={dodging}
+        {...handlers}
+        aria-label={t(lang, "holdToDodge")}
+        style={{ touchAction: "none" }}
+        className={cn(
+          "relative h-11 w-full select-none overflow-hidden rounded-[var(--radius-tile)] border text-sm font-semibold outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-warn",
+          dodging
+            ? "border-hairline bg-surface text-fg-mute opacity-60"
+            : holding
+              ? "border-warn text-bg"
+              : "border-hairline bg-surface text-fg-dim active:bg-surface-hi md:hover:bg-surface-hi md:hover:text-fg",
+        )}
+      >
+        <span
+          aria-hidden
+          className="absolute inset-0 origin-left bg-warn ease-[var(--ease-out-quart)]"
+          style={{
+            transform: holding ? "scaleX(1)" : "scaleX(0)",
+            transitionProperty: "transform",
+            transitionDuration: holding ? `${HOLD_MS}ms` : "150ms",
+          }}
+        />
+        <span className="relative z-10 inline-flex items-center justify-center gap-2">
+          <DoorOpen className="h-4 w-4" />
+          {dodging ? t(lang, "dodging") : t(lang, "holdToDodge")}
+        </span>
+      </button>
+      <p className="px-1 text-[11px] leading-tight text-fg-mute">{t(lang, "dodgeWarning")}</p>
+    </div>
   );
 }
 

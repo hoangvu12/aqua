@@ -267,6 +267,7 @@ func (p *Picker) build(snap Snapshot, err error) State {
 				Self:       pl.PUUID == puuid,
 				Stats:      pl.Stats,
 				PartyGroup: pl.PartyGroup,
+				Skins:      pl.Skins,
 			})
 		}
 	case "pregame":
@@ -407,6 +408,20 @@ func (p *Picker) HandlePhoneFrame(ctx context.Context, typ, reqID string, data j
 		p.optAgent, p.optSince = agent, time.Now()
 		p.mu.Unlock()
 		p.sink.SendResult(reqID, true, "locking")
+		p.triggerRefresh()
+
+	case "dodge":
+		// Quit agent select (the API-level dodge the game has no button for).
+		mid := p.currentMatch()
+		if mid == "" {
+			p.sink.SendResult(reqID, false, "not in agent select")
+			return
+		}
+		if err := p.src.Quit(ctx, mid); err != nil {
+			p.sink.SendResult(reqID, false, err.Error())
+			return
+		}
+		p.sink.SendResult(reqID, true, "dodged")
 		p.triggerRefresh()
 
 	case "set_config":

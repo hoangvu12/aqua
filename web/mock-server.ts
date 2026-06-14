@@ -78,12 +78,27 @@ const CYPHER = "117ed9e3-49f3-6512-3ccf-0cada7e3823b";
 const REYNA = "a3bfb853-43b2-7238-a4f1-ad90e9e46bce";
 const RAZE = "f94c3b30-42be-e959-889c-5aa313dba261";
 
+// Real valorant-api skin renders so the mock scoreboard exercises the equipped-
+// skins strip in the expanded row. Some players run all-default (no `skins`) to
+// show that case too.
+const SKIN = "https://media.valorant-api.com/weaponskins/";
+const skin = (weapon: string, name: string, id: string) => ({ weapon, name, image: `${SKIN}${id}/displayicon.png` });
+
 // A fixed 10-player live match (5 ally + 5 enemy) for the ingame scoreboard.
 const SCOREBOARD = [
   { name: "You", agent_uuid: JETT, team: "ally", self: true, party_group: 1,
-    stats: stat("You", 19, 24, 1.21, 158, 28.0, 52, [true, false, true, true, false]) },
+    stats: stat("You", 19, 24, 1.21, 158, 28.0, 52, [true, false, true, true, false]),
+    skins: [
+      skin("Vandal", "Prelude to Chaos Vandal", "522a264e-4ca7-adb0-6cf1-28b2ef938727"),
+      skin("Operator", "RGX 11z Pro Operator", "2e1936ed-4582-628f-da9c-25a7f47323cc"),
+      skin("Knife", "Reaver Karambit", "b73d7b16-4652-bc5b-5c4c-068aabb19d0a"),
+    ] },
   { name: "wazuu#1406", agent_uuid: REYNA, team: "ally", self: false, party_group: 1,
-    stats: stat("wazuu#1406", 19, 20, 1.46, 194, 22.0, 45, [true, true, false, true, true]) },
+    stats: stat("wazuu#1406", 19, 20, 1.46, 194, 22.0, 45, [true, true, false, true, true]),
+    skins: [
+      skin("Vandal", "Primordium Vandal", "a70fd508-44ea-8de3-3b30-d3a7eb9db42e"),
+      skin("Phantom", "Recon Phantom", "d67b929f-4431-61c0-286e-3ebf3d11c4af"),
+    ] },
   { name: "BrimstonMimstone#NA1", agent_uuid: BRIMSTONE, team: "ally", self: false, party_group: 0,
     stats: stat("BrimstonMimstone#NA1", 14, 16, 0.57, 96, 9.1, 36, [false, false, true, false, false]) },
   { name: "PostBTW#EUW", agent_uuid: SOVA, team: "ally", self: false, party_group: 0,
@@ -91,13 +106,23 @@ const SCOREBOARD = [
   { name: "penna#777", agent_uuid: SAGE, team: "ally", self: false, party_group: 0,
     stats: stat("penna#777", 6, 9, 0.25, 68, 12.5, 0, [false, false]) },
   { name: "ErSupremoLaziale#EU", agent_uuid: PHOENIX, team: "enemy", self: false, party_group: 2,
-    stats: stat("ErSupremoLaziale#EU", 15, 20, 2.18, 207, 23.2, 100, [true, true, true]) },
+    stats: stat("ErSupremoLaziale#EU", 15, 20, 2.18, 207, 23.2, 100, [true, true, true]),
+    skins: [
+      skin("Vandal", "Oni Phantom", "36791b03-452d-8dad-0091-898cc28d2196"),
+      skin("Operator", "RGX 11z Pro Operator", "2e1936ed-4582-628f-da9c-25a7f47323cc"),
+      skin("Knife", "Sovereign Sword", "2e77ac95-4681-3d87-bbdc-93a50ff6b1f6"),
+    ] },
   { name: "Sykkuno#0001", agent_uuid: OMEN, team: "enemy", self: false, party_group: 2,
     stats: stat("Sykkuno#0001", 21, 22, 1.33, 172, 19.4, 58, [true, false, true, true, true]) },
   { name: "miyu#vn2", agent_uuid: KILLJOY, team: "enemy", self: false, party_group: 0,
     stats: stat("miyu#vn2", 17, 18, 0.94, 131, 15.0, 40, [false, true, false, false, true]) },
   { name: "Tenz#TENZ", agent_uuid: RAZE, team: "enemy", self: false, party_group: 3,
-    stats: stat("Tenz#TENZ", 27, 27, 1.88, 221, 31.7, 70, [true, true, false, true, true]) },
+    stats: stat("Tenz#TENZ", 27, 27, 1.88, 221, 31.7, 70, [true, true, false, true, true]),
+    skins: [
+      skin("Vandal", "Prelude to Chaos Vandal", "522a264e-4ca7-adb0-6cf1-28b2ef938727"),
+      skin("Phantom", "Oni Phantom", "36791b03-452d-8dad-0091-898cc28d2196"),
+      skin("Knife", "Reaver Karambit", "b73d7b16-4652-bc5b-5c4c-068aabb19d0a"),
+    ] },
   { name: "noob#123", agent_uuid: CYPHER, team: "enemy", self: false, party_group: 3,
     stats: stat("noob#123", 0, 0, 0.61, 88, 11.2, 25, [false, false, true, false]) },
 ];
@@ -184,6 +209,17 @@ const server = Bun.serve<{ s: Session }, undefined>({
       return new Response(r.body, {
         status: r.status,
         headers: { "content-type": r.headers.get("content-type") ?? "application/json" },
+      });
+    }
+
+    // The Worker also mirrors valorant-api media at /cdn; the PROD bundle rewrites
+    // skin-render URLs there (see lib/catalog.ts mediaUrl), so the mock proxies it
+    // too or those images 404 locally.
+    if (url.pathname.startsWith("/cdn/")) {
+      const r = await fetch("https://media.valorant-api.com/" + url.pathname.slice(5) + url.search);
+      return new Response(r.body, {
+        status: r.status,
+        headers: { "content-type": r.headers.get("content-type") ?? "image/png" },
       });
     }
 

@@ -18,7 +18,8 @@ type fakeSource struct {
 	puuid   string
 	selects []string
 	locks   []string
-	startMM int // count of StartMatchmaking calls (party owner-gate test)
+	quits   []string // match ids passed to Quit (dodge test)
+	startMM int      // count of StartMatchmaking calls (party owner-gate test)
 }
 
 func (f *fakeSource) Snapshot(context.Context) (Snapshot, error) { return f.snap, nil }
@@ -28,6 +29,10 @@ func (f *fakeSource) Select(_ context.Context, _, a string) error {
 }
 func (f *fakeSource) Lock(_ context.Context, _, a string) error {
 	f.locks = append(f.locks, a)
+	return nil
+}
+func (f *fakeSource) Quit(_ context.Context, mid string) error {
+	f.quits = append(f.quits, mid)
 	return nil
 }
 func (f *fakeSource) Authenticate(context.Context) error { return nil }
@@ -302,6 +307,36 @@ func TestPartyOwnerGate(t *testing.T) {
 	}
 	if r := sink2.lastResult(); !r.ok || r.reqID != "r2" {
 		t.Errorf("owner result = %+v, want ok=true reqID=r2", r)
+	}
+}
+
+// TestDodge: the dodge command quits the current pregame match through the
+// source; outside agent select (no match id) it's refused without a source call.
+func TestDodge(t *testing.T) {
+	ctx := context.Background()
+
+	// In agent select → quit the current match, reply ok.
+	src := &fakeSource{puuid: "self", snap: pregameSnap(PlayerSlot{PUUID: "self"})}
+	p, sink := newPicker(&config.Config{}, src)
+	p.poll(ctx) // populate matchID from the snapshot
+	p.HandlePhoneFrame(ctx, "dodge", "d1", nil)
+	if len(src.quits) != 1 || src.quits[0] != "m1" {
+		t.Errorf("dodge in pregame: quits = %v, want [m1]", src.quits)
+	}
+	if r := sink.lastResult(); !r.ok || r.reqID != "d1" {
+		t.Errorf("dodge result = %+v, want ok=true reqID=d1", r)
+	}
+
+	// Not in agent select (menus, no match id) → refused, source untouched.
+	src2 := &fakeSource{snap: Snapshot{Running: true, Phase: "menus"}}
+	p2, sink2 := newPicker(&config.Config{}, src2)
+	p2.poll(ctx)
+	p2.HandlePhoneFrame(ctx, "dodge", "d2", nil)
+	if len(src2.quits) != 0 {
+		t.Errorf("dodge outside pregame reached source: quits = %v, want none", src2.quits)
+	}
+	if r := sink2.lastResult(); r.ok || r.reqID != "d2" {
+		t.Errorf("dodge-outside result = %+v, want ok=false reqID=d2", r)
 	}
 }
 

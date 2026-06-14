@@ -75,4 +75,15 @@ type MatchSeat struct {
 	Self       bool              `json:"self"`
 	Stats      *riot.PlayerStats `json:"stats,omitempty"`
 	PartyGroup int               `json:"party_group"` // 0 = none; 1..n = inferred premade group
+	// Skins is the player's equipped skin for a curated set of guns (resolved name
+	// + render), shown in the scoreboard's expanded row. Absent until the async
+	// loadout fetch fills it; empty once fetched if they run all default skins.
+	Skins []SeatSkin `json:"skins,omitempty"`
+}
+
+// SeatSkin is one resolved equipped skin: which gun, the skin name, and a render.
+type SeatSkin struct {
+	Weapon string `json:"weapon"` // "Vandal", "Knife", …
+	Name   string `json:"name"`   // "Prelude to Chaos Vandal"
+	Image  string `json:"image"`  // valorant-api render URL (the phone rewrites to /cdn)
 }

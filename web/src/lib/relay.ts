@@ -33,6 +33,9 @@ export interface Relay {
   gotState: boolean;
   select: (agentId: string) => Promise<ResultData>;
   lock: (agentId: string) => Promise<ResultData>;
+  /** Dodge (quit) agent select. Reshapes the whole state back to menus, so no
+   * optimistic patch — the StateScreen shows until the PC pushes the new truth. */
+  dodge: () => Promise<ResultData>;
   setConfig: (args: SetConfigArgs) => Promise<ResultData>;
   getState: () => void;
   /** Party (lobby) management. Owner-only ops are also gated by the PC. */
@@ -302,6 +305,9 @@ export function useRelay(creds: Creds | null, onAuthInvalid: () => void): Relay 
     (agentId: string) => runCommand({ type: "lock", data: { agentId } }),
     [runCommand],
   );
+  // Dodge reshapes the whole game state (back to menus) we can't predict → no
+  // patch; the UI falls through to its loading/menus view on the next frame.
+  const dodge = useCallback(() => runCommand({ type: "dodge", data: {} }), [runCommand]);
   const setConfig = useCallback(
     (args: SetConfigArgs) => {
       const patches: Patch[] = [];
@@ -394,5 +400,5 @@ export function useRelay(creds: Creds | null, onAuthInvalid: () => void): Relay 
     [runCommand],
   );
 
-  return { conn, game, gotState, select, lock, setConfig, getState, party };
+  return { conn, game, gotState, select, lock, dodge, setConfig, getState, party };
 }

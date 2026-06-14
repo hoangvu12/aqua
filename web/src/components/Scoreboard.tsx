@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, Swords } from "lucide-react";
-import type { Agent, Catalog, CompetitiveTier, MatchSeat, RecentMatch } from "@/lib/types";
-import { agentByUuid, rankByTier } from "@/lib/catalog";
+import type { Agent, Catalog, CompetitiveTier, MatchSeat, RecentMatch, SeatSkin } from "@/lib/types";
+import { agentByUuid, mediaUrl, rankByTier } from "@/lib/catalog";
 import { t, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -83,6 +83,8 @@ function Team({
 function Row({ seat, catalog, lang }: { seat: MatchSeat; catalog: Catalog | null; lang: Lang }) {
   const [open, setOpen] = useState(false);
   const s = seat.stats ?? null;
+  const skins = seat.skins ?? [];
+  const canExpand = !!s || skins.length > 0;
   const agent = seat.agent_uuid ? agentByUuid(catalog, seat.agent_uuid) : undefined;
   const rank = rankByTier(catalog, s?.tier ?? 0);
   const peak = rankByTier(catalog, s?.peak_tier ?? 0);
@@ -102,7 +104,7 @@ function Row({ seat, catalog, lang }: { seat: MatchSeat; catalog: Catalog | null
         style={{ backgroundColor: partyColor(seat.party_group) }}
       />
       <button
-        onClick={() => s && setOpen((v) => !v)}
+        onClick={() => canExpand && setOpen((v) => !v)}
         className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left md:hover:bg-surface-hi"
         aria-expanded={open}
       >
@@ -128,7 +130,7 @@ function Row({ seat, catalog, lang }: { seat: MatchSeat; catalog: Catalog | null
         {/* …rank emblems (current + peak) on the right. */}
         <RankCluster rank={rank} peak={peak} lang={lang} />
 
-        {s && (
+        {canExpand && (
           <ChevronDown
             className={cn(
               "h-4 w-4 shrink-0 text-fg-mute transition-transform duration-150 ease-[var(--ease-out-quart)]",
@@ -138,18 +140,58 @@ function Row({ seat, catalog, lang }: { seat: MatchSeat; catalog: Catalog | null
         )}
       </button>
 
-      {open && s && (
-        <div className="grid grid-cols-4 gap-1.5 border-t border-hairline px-2.5 py-2">
-          <Stat label={t(lang, "statKd")} value={s.kd.toFixed(2)} />
-          <Stat label={t(lang, "statAdr")} value={Math.round(s.adr).toString()} />
-          <Stat label={t(lang, "statHs")} value={`${Math.round(s.hs_pct)}%`} />
-          <Stat label={t(lang, "statWin")} value={`${Math.round(s.win_pct)}%`} />
-          <RecentRr recent={s.recent} lang={lang} />
-          <div className="col-span-4 mt-0.5 px-0.5 text-right text-[10px] tabular-nums text-fg-mute">
-            {s.matches} {t(lang, "matchesShort")}
-          </div>
+      {open && canExpand && (
+        <div className="border-t border-hairline px-2.5 py-2">
+          {s && (
+            <div className="grid grid-cols-4 gap-1.5">
+              <Stat label={t(lang, "statKd")} value={s.kd.toFixed(2)} />
+              <Stat label={t(lang, "statAdr")} value={Math.round(s.adr).toString()} />
+              <Stat label={t(lang, "statHs")} value={`${Math.round(s.hs_pct)}%`} />
+              <Stat label={t(lang, "statWin")} value={`${Math.round(s.win_pct)}%`} />
+              <RecentRr recent={s.recent} lang={lang} />
+              <div className="col-span-4 mt-0.5 px-0.5 text-right text-[10px] tabular-nums text-fg-mute">
+                {s.matches} {t(lang, "matchesShort")}
+              </div>
+            </div>
+          )}
+          {skins.length > 0 && <SkinShelf skins={skins} lang={lang} divided={!!s} />}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Equipped skins (curated guns), shown only in the expanded row so the at-a-
+ * glance scoreboard stays clean. The renders carry the color; the labels stay
+ * muted (PRODUCT: real art over invented decoration). Two columns so 6 fit
+ * without scrolling, each gun render left-aligned over its skin name. */
+function SkinShelf({ skins, lang, divided }: { skins: SeatSkin[]; lang: Lang; divided: boolean }) {
+  return (
+    <div className={cn(divided && "mt-2.5 border-t border-hairline pt-2.5")}>
+      <div className="label mb-1.5 text-[10px] text-fg-mute">{t(lang, "skins")}</div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+        {skins.map((sk, i) => (
+          <SkinCell key={`${sk.weapon}-${i}`} skin={sk} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SkinCell({ skin }: { skin: SeatSkin }) {
+  return (
+    <div className="min-w-0">
+      <div className="flex h-9 items-center rounded-md bg-surface-hi/50 px-1.5">
+        <img
+          src={mediaUrl(skin.image)}
+          alt=""
+          loading="lazy"
+          className="h-7 w-full object-contain object-left"
+        />
+      </div>
+      <span className="mt-1 block truncate text-[11px] leading-tight text-fg-dim" title={skin.name}>
+        {skin.name}
+      </span>
     </div>
   );
 }

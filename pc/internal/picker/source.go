@@ -76,6 +76,7 @@ type PlayerSlot struct {
 	Team           string            // "ally"|"enemy" (live match scoreboard)
 	Stats          *riot.PlayerStats // tracker row; nil until the background fetch fills it
 	PartyGroup     int               // 0 = no detected premade; 1..n = inferred party group (per match)
+	Skins          []SeatSkin        // equipped skins (live match); nil until the loadout fetch fills it
 }
 
 // Source is everything the picker needs from "the game". Implemented by
@@ -84,7 +85,8 @@ type Source interface {
 	Snapshot(ctx context.Context) (Snapshot, error)
 	Select(ctx context.Context, matchID, agentID string) error
 	Lock(ctx context.Context, matchID, agentID string) error
-	Authenticate(ctx context.Context) error // force a fresh auth (test_auth)
+	Quit(ctx context.Context, matchID string) error // dodge agent select
+	Authenticate(ctx context.Context) error         // force a fresh auth (test_auth)
 	PUUID() string
 
 	// Party (lobby) management. id is the current party id; owner-only operations
@@ -123,6 +125,16 @@ type riotSource struct {
 	partySig      string
 	partyByPUUID  map[string]int
 	partyFetching bool
+
+	// Equipped skins (live match), same once-per-match background pattern as stats.
+	// loadoutByPUUID maps puuid → its resolved skins; keyed by match id so it
+	// recomputes per match. skinCat is the valorant-api skin catalog, fetched once
+	// and reused (it changes only on patch).
+	loadoutMu       sync.Mutex
+	loadoutKey      string
+	loadoutByPUUID  map[string][]SeatSkin
+	loadoutFetching bool
+	skinCat         map[string]riot.SkinInfo
 
 	// onUpdate is fired when a background stats fetch fills the cache, so the
 	// picker re-emits the now-complete scoreboard without waiting for the
@@ -278,6 +290,7 @@ func (s *riotSource) snapshotLocked(ctx context.Context) (Snapshot, error) {
 		}
 		attachStats(snap.Players, s.lobbyStats(c, cgMatchID, "", puuids))
 		attachPartyGroups(snap.Players, s.partyGroups(c, cgMatchID, snap.Players))
+		attachSkins(snap.Players, s.loadouts(c, cgMatchID))
 		return snap, nil
 	}
 
@@ -476,6 +489,90 @@ func attachPartyGroups(players []PlayerSlot, groups map[string]int) {
 	}
 }
 
+// loadouts returns the resolved equipped skins per puuid for the live match,
+// kicking off a one-shot background fetch when the match changes. Never blocks the
+// poll (same contract as lobbyStats/partyGroups): returns whatever is computed now
+// and fires onUpdate when the result lands. One GLZ call covers all ten players.
+func (s *riotSource) loadouts(c *riot.Client, matchID string) map[string][]SeatSkin {
+	s.loadoutMu.Lock()
+	defer s.loadoutMu.Unlock()
+
+	if matchID != s.loadoutKey {
+		s.loadoutKey, s.loadoutByPUUID, s.loadoutFetching = matchID, nil, false
+	}
+
+	if matchID != "" && s.loadoutByPUUID == nil && !s.loadoutFetching {
+		s.loadoutFetching = true
+		key := matchID
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			cat := s.skinCatalog(ctx, c)
+			byP := map[string][]SeatSkin{}
+			if raw, err := c.MatchLoadouts(ctx, key); err == nil {
+				for subj, eqs := range raw {
+					var skins []SeatSkin
+					for _, eq := range eqs {
+						if info, ok := cat[eq.SkinID]; ok { // miss = default/unresolved → drop
+							skins = append(skins, SeatSkin{Weapon: eq.Weapon, Name: info.Name, Image: info.Image})
+						}
+					}
+					if len(skins) > 0 {
+						byP[subj] = skins
+					}
+				}
+			}
+			s.loadoutMu.Lock()
+			fresh := s.loadoutKey == key
+			if fresh {
+				s.loadoutByPUUID = byP // non-nil (maybe empty) → "computed; don't refetch"
+			}
+			s.loadoutFetching = false
+			s.loadoutMu.Unlock()
+			if fresh && s.onUpdate != nil && len(byP) > 0 {
+				s.onUpdate()
+			}
+		}()
+	}
+
+	out := make(map[string][]SeatSkin, len(s.loadoutByPUUID))
+	for k, v := range s.loadoutByPUUID {
+		out[k] = v
+	}
+	return out
+}
+
+// skinCatalog returns the valorant-api skin catalog (uuid → name + render),
+// fetching it once and caching it (best-effort; a failed fetch retries on the next
+// match, since skins are dropped silently when the catalog is empty). Caller runs
+// off the poll loop, so the network fetch never blocks a snapshot.
+func (s *riotSource) skinCatalog(ctx context.Context, c *riot.Client) map[string]riot.SkinInfo {
+	s.loadoutMu.Lock()
+	cat := s.skinCat
+	s.loadoutMu.Unlock()
+	if cat != nil {
+		return cat
+	}
+	m, err := c.WeaponSkins(ctx)
+	if err != nil || len(m) == 0 {
+		return nil
+	}
+	s.loadoutMu.Lock()
+	s.skinCat = m
+	s.loadoutMu.Unlock()
+	return m
+}
+
+// attachSkins stamps each player's resolved equipped skins (nil until fetched).
+func attachSkins(players []PlayerSlot, byPUUID map[string][]SeatSkin) {
+	if len(byPUUID) == 0 {
+		return
+	}
+	for i := range players {
+		players[i].Skins = byPUUID[players[i].PUUID]
+	}
+}
+
 // rosterSig is a stable key for a match's roster (match id + sorted puuids) so
 // party detection recomputes when the set of players changes — pregame's 5 allies
 // to core-game's 10 — but not on every poll.
@@ -525,6 +622,16 @@ func (s *riotSource) Lock(ctx context.Context, matchID, agentID string) error {
 		return errors.New("not authenticated")
 	}
 	return c.Lock(ctx, matchID, agentID)
+}
+
+func (s *riotSource) Quit(ctx context.Context, matchID string) error {
+	s.mu.Lock()
+	c := s.client
+	s.mu.Unlock()
+	if c == nil {
+		return errors.New("not authenticated")
+	}
+	return c.QuitPregame(ctx, matchID)
 }
 
 // withClient runs fn against the live client (or errors if not authenticated),

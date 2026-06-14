@@ -46,6 +46,11 @@ const en = {
   autoLock: "Auto-lock",
   takenPickAnother: "was taken — pick another",
   banWarning: "Auto-lock is automation Riot can ban for.",
+  // dodge (quit agent select)
+  dodge: "Dodge",
+  holdToDodge: "Hold to dodge",
+  dodgeWarning: "Leaves agent select now. Costs RR and a short queue ban.",
+  dodging: "Dodging…",
   // allies
   allies: "Allies",
   empty: "Open",
@@ -99,6 +104,9 @@ const en = {
   matchesShort: "matches",
   noStats: "No recent data",
   loadingStats: "Loading stats…",
+  // equipped skins (scoreboard expand)
+  skins: "Skins",
+  loadingSkins: "Loading skins…",
   // offline / error screens
   pcOfflineTitle: "PC offline",
   pcOfflineBody: "Start Aqua.exe on your PC and open VALORANT.",
@@ -156,6 +164,10 @@ const vi: Bundle = {
   autoLock: "Tự khóa",
   takenPickAnother: "đã bị chọn — hãy chọn tướng khác",
   banWarning: "Tự khóa là tự động hóa, Riot có thể cấm tài khoản.",
+  dodge: "Thoát trận",
+  holdToDodge: "Giữ để thoát",
+  dodgeWarning: "Rời khỏi phần chọn tướng ngay. Mất RR và bị khóa hàng chờ một lúc.",
+  dodging: "Đang thoát…",
   allies: "Đồng đội",
   empty: "Trống",
   you: "Bạn",
@@ -205,6 +217,8 @@ const vi: Bundle = {
   matchesShort: "trận",
   noStats: "Chưa có dữ liệu",
   loadingStats: "Đang tải chỉ số…",
+  skins: "Skin",
+  loadingSkins: "Đang tải skin…",
   pcOfflineTitle: "PC ngoại tuyến",
   pcOfflineBody: "Mở Aqua.exe trên PC và khởi động VALORANT.",
   errorTitle: "Có gì đó trục trặc",

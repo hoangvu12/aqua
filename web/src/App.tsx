@@ -137,6 +137,7 @@ export default function App() {
     relay.lock(effectiveUuid);
     remember(effectiveUuid);
   };
+  const onDodge = () => relay.dodge();
   const onArm = () => {
     if (!effectiveUuid) return;
     relay.setConfig({ prepick_agent_uuid: effectiveUuid });
@@ -200,6 +201,7 @@ export default function App() {
             lang={lang}
             pendingLock={pendingLock}
             onLock={onLock}
+            onDodge={onDodge}
             onArm={onArm}
             onDisarm={onDisarm}
             onToggleAutoLock={onToggleAutoLock}
