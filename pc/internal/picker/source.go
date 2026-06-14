@@ -36,6 +36,13 @@ type Snapshot struct {
 	OwnedAgents          []string
 	Locale               string
 
+	// Live round score (ingame only), read from the local presence blob. Ally is
+	// our team's rounds. HasScore guards the 0-0 ambiguity: a real pistol round is
+	// 0-0, so the bool — not a zero value — says whether to show the score.
+	ScoreAlly  int
+	ScoreEnemy int
+	HasScore   bool
+
 	// Party (lobby) surface — populated in the pre-match states only.
 	PartyID          string
 	Accessibility    string // OPEN|CLOSED
@@ -241,6 +248,11 @@ func (s *riotSource) snapshotLocked(ctx context.Context) (Snapshot, error) {
 	}
 	if err == nil && cgMatchID != "" {
 		snap := Snapshot{Running: true, Phase: "ingame", MatchID: cgMatchID, OwnedAgents: s.owned, Locale: c.Locale()}
+		// Live round score from our own presence — the only live in-match number
+		// Riot exposes. Best-effort: absent → no score header on the scoreboard.
+		if score := c.LiveMatchScore(ctx); score.Valid {
+			snap.ScoreAlly, snap.ScoreEnemy, snap.HasScore = score.Ally, score.Enemy, true
+		}
 		seats, serr := c.CoreGameMatch(ctx, cgMatchID)
 		if serr != nil {
 			return snap, nil // degrade to a bare "in match" screen on any roster failure

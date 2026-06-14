@@ -63,7 +63,9 @@ function stat(
     kd,
     adr,
     hs_pct: hs,
-    recent,
+    // RecentMatch[]: a synthesized RR delta per result (mock is all competitive)
+    // so the RR-folded streak renders. Mirrors sim.go's simStat.
+    recent: recent.map((won, i) => ({ won, rr: won ? 19 + (i % 3) : -(17 + (i % 3)) })),
   };
 }
 
@@ -141,6 +143,10 @@ function makeState(s: Session) {
           ]
         : [],
       match_players: s.phase === "ingame" ? SCOREBOARD : [],
+      // Live round score (presence-derived on the PC); shown only ingame.
+      score_ally: s.phase === "ingame" ? 7 : 0,
+      score_enemy: s.phase === "ingame" ? 5 : 0,
+      score_valid: s.phase === "ingame",
       self_agent_uuid: s.selfAgent,
       self_status: s.selfStatus,
       // Party (lobby) surface — pre-match states only (self is owner so the

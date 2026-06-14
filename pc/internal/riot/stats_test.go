@@ -7,23 +7,24 @@ import (
 )
 
 // TestAggregateStats locks in the tracker math: Win%/K-D/ADR/HS% over recent
-// matches, that Recent preserves newest-first order, and that a match the
-// player wasn't in (shared-match dedupe) is skipped.
+// matches, that Recent preserves newest-first order and folds in per-match RR
+// deltas, and that a match the player wasn't in (shared-match dedupe) is skipped.
 func TestAggregateStats(t *testing.T) {
 	const me = "p1"
 	matches := []*MatchDetail{
-		{Players: map[string]MatchPlayer{
+		{MatchID: "m1", Players: map[string]MatchPlayer{
 			me: {Won: true, Kills: 20, Deaths: 10, Rounds: 20, Damage: 3000, Headshots: 30, Bodyshots: 60, Legshots: 10},
 		}},
-		{Players: map[string]MatchPlayer{
+		{MatchID: "m2", Players: map[string]MatchPlayer{
 			me: {Won: false, Kills: 10, Deaths: 10, Rounds: 20, Damage: 2000, Headshots: 10, Bodyshots: 80, Legshots: 10},
 		}},
-		{Players: map[string]MatchPlayer{ // me not in this one → must be skipped
+		{MatchID: "m3", Players: map[string]MatchPlayer{ // me not in this one → must be skipped
 			"other": {Won: true, Kills: 99},
 		}},
 	}
+	rr := map[string]int{"m1": 18, "m2": -22} // m2 has a RR delta; only m1/m2 are the player's
 
-	st := AggregateStats(me, matches)
+	st := AggregateStats(me, matches, rr)
 
 	if st.Matches != 2 {
 		t.Fatalf("Matches = %d, want 2", st.Matches)
@@ -40,8 +41,9 @@ func TestAggregateStats(t *testing.T) {
 	if !approx(st.HSPct, 20) { // 40 hs / (40+140+20) shots
 		t.Fatalf("HSPct = %v, want 20", st.HSPct)
 	}
-	if want := []bool{true, false}; !reflect.DeepEqual(st.Recent, want) {
-		t.Fatalf("Recent = %v, want %v (newest first)", st.Recent, want)
+	want := []RecentMatch{{Won: true, RR: ptr(18)}, {Won: false, RR: ptr(-22)}}
+	if !reflect.DeepEqual(st.Recent, want) {
+		t.Fatalf("Recent = %+v, want %+v (newest first, with RR)", st.Recent, want)
 	}
 }
 
@@ -51,10 +53,12 @@ func TestAggregateStatsZeroDeaths(t *testing.T) {
 	const me = "p1"
 	st := AggregateStats(me, []*MatchDetail{
 		{Players: map[string]MatchPlayer{me: {Won: true, Kills: 7, Deaths: 0, Rounds: 13}}},
-	})
+	}, nil)
 	if !approx(st.KD, 7) {
 		t.Fatalf("KD = %v, want 7", st.KD)
 	}
 }
 
 func approx(got, want float64) bool { return math.Abs(got-want) < 1e-9 }
+
+func ptr(i int) *int { return &i }

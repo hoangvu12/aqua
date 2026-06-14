@@ -21,6 +21,12 @@ type State struct {
 	// MatchPlayers is the live-match scoreboard (both teams), populated only in
 	// the ingame state. Always present (never null) for a stable phone shape.
 	MatchPlayers []MatchSeat `json:"match_players"`
+	// Live round score (ingame only), from the local presence blob — the one live
+	// in-match number Riot exposes. ScoreAlly is our team's rounds. ScoreValid
+	// gates rendering (0-0 is a real pistol round, so a zero value isn't "unknown").
+	ScoreAlly  int  `json:"score_ally"`
+	ScoreEnemy int  `json:"score_enemy"`
+	ScoreValid bool `json:"score_valid"`
 	// SelfAgentUUID/SelfStatus are the local player's own seat (game truth), so the
 	// phone reflects picks made on the PC and renders correctly on cold-start.
 	SelfAgentUUID string `json:"self_agent_uuid"`

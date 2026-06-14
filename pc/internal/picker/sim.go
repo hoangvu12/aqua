@@ -15,17 +15,24 @@ const (
 )
 
 // simStat fabricates a tracker row. Tier numbers follow valorant-api
-// competitivetiers (Iron 1 = 3 … Radiant = 27); recent is newest-first W/L.
+// competitivetiers (Iron 1 = 3 … Radiant = 27); recent is newest-first W/L,
+// turned into RecentMatch with a synthesized RR delta per result (sim is all
+// competitive) so the phone exercises the RR-folded streak.
 func simStat(name string, tier, peak int, kd, adr, hs, win float64, recent []bool) *riot.PlayerStats {
 	wins := 0
-	for _, w := range recent {
+	rm := make([]riot.RecentMatch, len(recent))
+	for i, w := range recent {
+		rr := -(17 + i%3) // a plausible loss: -17..-19
 		if w {
 			wins++
+			rr = 19 + i%3 // a plausible win: +19..+21
 		}
+		v := rr
+		rm[i] = riot.RecentMatch{Won: w, RR: &v}
 	}
 	return &riot.PlayerStats{
 		PUUID: "sim-" + name, Name: name, Tier: tier, RR: 47, PeakTier: peak,
-		Matches: len(recent), Wins: wins, WinPct: win, KD: kd, ADR: adr, HSPct: hs, Recent: recent,
+		Matches: len(recent), Wins: wins, WinPct: win, KD: kd, ADR: adr, HSPct: hs, Recent: rm,
 	}
 }
 
@@ -145,6 +152,7 @@ func (s *simSource) Snapshot(context.Context) (Snapshot, error) {
 		return Snapshot{
 			Running: true, Phase: "ingame", MatchID: "sim-match", Locale: "vi-VN",
 			OwnedAgents: owned, Players: simScoreboard(s.ourAgent),
+			ScoreAlly: 7, ScoreEnemy: 5, HasScore: true,
 		}, nil
 	}
 	return Snapshot{
@@ -207,8 +215,8 @@ func (s *simSource) ChangeQueue(_ context.Context, _, queueID string) error {
 	s.queue = queueID
 	return nil
 }
-func (s *simSource) JoinByCode(context.Context, string) error      { return nil }
-func (s *simSource) LeaveParty(context.Context) error              { return nil }
-func (s *simSource) KickMember(context.Context, string) error      { return nil }
+func (s *simSource) JoinByCode(context.Context, string) error       { return nil }
+func (s *simSource) LeaveParty(context.Context) error               { return nil }
+func (s *simSource) KickMember(context.Context, string) error       { return nil }
 func (s *simSource) StartMatchmaking(context.Context, string) error { return nil }
 func (s *simSource) StopMatchmaking(context.Context, string) error  { return nil }

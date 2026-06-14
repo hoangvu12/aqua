@@ -206,7 +206,12 @@ export default function App() {
           )}
         </>
       ) : game && game.state === "ingame" && game.match_players.length > 0 ? (
-        <Scoreboard players={game.match_players} catalog={catalog} lang={lang} />
+        <Scoreboard
+          players={game.match_players}
+          score={game.score_valid ? { ally: game.score_ally, enemy: game.score_enemy } : null}
+          catalog={catalog}
+          lang={lang}
+        />
       ) : (
         <StateScreen kind={screenKind(game, graceExpired)} lang={lang} />
       )}

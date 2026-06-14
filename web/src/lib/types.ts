@@ -31,7 +31,14 @@ export interface PlayerStats {
   kd: number;
   adr: number; // avg damage / round
   hs_pct: number; // 0..100
-  recent: boolean[]; // newest-first W/L
+  recent: RecentMatch[]; // newest-first recent form
+}
+
+/** One recent match in the form streak. `rr` is the RR gained/lost — present only
+ * for competitive matches (null otherwise), so a dot can render as a +/- delta. */
+export interface RecentMatch {
+  won: boolean;
+  rr: number | null;
 }
 
 /** One ally-team seat in agent select. status ∈ ""|selected|locked. `self`
@@ -89,6 +96,12 @@ export interface GameStateMsg {
   teammates: Teammate[];
   /** Live-match scoreboard (both teams); populated only in the `ingame` state. */
   match_players: MatchSeat[];
+  /** Live round score (ingame only), from the PC's presence read. `score_ally` is
+   * your team's rounds. `score_valid` gates rendering (0-0 is a real pistol
+   * round, so a zero value alone isn't "unknown"). */
+  score_ally: number;
+  score_enemy: number;
+  score_valid: boolean;
   /** The local player's own seat (game truth), so the phone reflects picks made
    * on the PC and renders correctly on cold-start. status ∈ ""|selected|locked. */
   self_agent_uuid: string;

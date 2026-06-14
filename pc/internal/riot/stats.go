@@ -20,18 +20,27 @@ const statsConcurrency = 6
 // PlayerStats is the per-player line the phone renders (one row in the lobby /
 // agent-select / scoreboard list).
 type PlayerStats struct {
-	PUUID    string  `json:"puuid"`
-	Name     string  `json:"name"`      // "GameName#TagLine" ("" if hidden/unresolved)
-	Tier     int     `json:"tier"`      // current competitive tier (0 = unranked)
-	RR       int     `json:"rr"`        // ranked rating within the current tier
-	PeakTier int     `json:"peak_tier"` // highest tier ever won a game at
-	Matches  int     `json:"matches"`   // matches counted in the aggregates below
-	Wins     int     `json:"wins"`
-	WinPct   float64 `json:"win_pct"` // 0..100
-	KD       float64 `json:"kd"`
-	ADR      float64 `json:"adr"`    // average damage per round
-	HSPct    float64 `json:"hs_pct"` // 0..100
-	Recent   []bool  `json:"recent"` // recent results, newest first (true = win)
+	PUUID    string        `json:"puuid"`
+	Name     string        `json:"name"`      // "GameName#TagLine" ("" if hidden/unresolved)
+	Tier     int           `json:"tier"`      // current competitive tier (0 = unranked)
+	RR       int           `json:"rr"`        // ranked rating within the current tier
+	PeakTier int           `json:"peak_tier"` // highest tier ever won a game at
+	Matches  int           `json:"matches"`   // matches counted in the aggregates below
+	Wins     int           `json:"wins"`
+	WinPct   float64       `json:"win_pct"` // 0..100
+	KD       float64       `json:"kd"`
+	ADR      float64       `json:"adr"`    // average damage per round
+	HSPct    float64       `json:"hs_pct"` // 0..100
+	Recent   []RecentMatch `json:"recent"` // recent results, newest first
+}
+
+// RecentMatch is one entry in the recent-form streak: whether the player won and,
+// for competitive matches, the RR they gained/lost. RR is a pointer because it's
+// only known for ranked games (the competitiveupdates feed) — nil renders as a
+// plain W/L dot, a value as a +/- delta.
+type RecentMatch struct {
+	Won bool `json:"won"`
+	RR  *int `json:"rr"` // RR delta (competitive only); nil if unknown
 }
 
 // ---- name-service (PD) ---------------------------------------------------
@@ -85,7 +94,7 @@ func (c *Client) PlayerMMR(ctx context.Context, puuid string) (RankInfo, error) 
 			Competitive struct {
 				SeasonalInfoBySeasonID map[string]struct {
 					CompetitiveTier int            `json:"CompetitiveTier"`
-					WinsByTier       map[string]int `json:"WinsByTier"`
+					WinsByTier      map[string]int `json:"WinsByTier"`
 				} `json:"SeasonalInfoBySeasonID"`
 			} `json:"competitive"`
 		} `json:"QueueSkills"`
@@ -109,6 +118,35 @@ func (c *Client) PlayerMMR(ctx context.Context, puuid string) (RankInfo, error) 
 		}
 	}
 	return info, nil
+}
+
+// CompetitiveUpdates returns the RR gained/lost per recent competitive match,
+// keyed by match id. It's the only source of per-match RR deltas (match-details
+// carries KDA but not RR), so the scoreboard folds these into the recent-form
+// streak. Always queue=competitive — RR only moves in ranked. Best-effort: an
+// error (e.g. a player who never queued competitive) yields an empty map and the
+// streak simply shows plain W/L dots.
+func (c *Client) CompetitiveUpdates(ctx context.Context, puuid string, count int) (map[string]int, error) {
+	if count <= 0 {
+		count = 10
+	}
+	path := fmt.Sprintf("/mmr/v1/players/%s/competitiveupdates?startIndex=0&endIndex=%d&queue=competitive", puuid, count)
+	var r struct {
+		Matches []struct {
+			MatchID            string `json:"MatchID"`
+			RankedRatingEarned int    `json:"RankedRatingEarned"`
+		} `json:"Matches"`
+	}
+	if err := c.glz(ctx, "GET", c.pdURL(path), &r); err != nil {
+		return nil, err
+	}
+	out := make(map[string]int, len(r.Matches))
+	for _, m := range r.Matches {
+		if m.MatchID != "" {
+			out[m.MatchID] = m.RankedRatingEarned
+		}
+	}
+	return out, nil
 }
 
 // ---- match history & details (PD) ---------------------------------------
@@ -266,10 +304,12 @@ func (c *Client) fetchMatchDetails(ctx context.Context, matchID string) (*MatchD
 // ---- aggregation ---------------------------------------------------------
 
 // AggregateStats reduces a player's recent matches into a tracker line. matches
-// should be newest-first; Recent mirrors that order. Pure (no I/O), so the
-// orchestration layer can fetch + cache match details however it likes and reuse
-// one MatchDetail across every player who shared that match.
-func AggregateStats(puuid string, matches []*MatchDetail) PlayerStats {
+// should be newest-first; Recent mirrors that order. rrByMatch maps match id →
+// RR delta (from CompetitiveUpdates) and may be nil — a match found there gets a
+// RR value on its Recent entry, others stay nil (non-competitive / unknown).
+// Pure (no I/O), so the orchestration layer can fetch + cache match details
+// however it likes and reuse one MatchDetail across every player who shared it.
+func AggregateStats(puuid string, matches []*MatchDetail, rrByMatch map[string]int) PlayerStats {
 	st := PlayerStats{PUUID: puuid}
 	var kills, deaths, damage, rounds, hs, body, leg int
 	for _, m := range matches {
@@ -281,7 +321,11 @@ func AggregateStats(puuid string, matches []*MatchDetail) PlayerStats {
 		if mp.Won {
 			st.Wins++
 		}
-		st.Recent = append(st.Recent, mp.Won)
+		rm := RecentMatch{Won: mp.Won}
+		if rr, ok := rrByMatch[m.MatchID]; ok {
+			rm.RR = &rr
+		}
+		st.Recent = append(st.Recent, rm)
 		kills += mp.Kills
 		deaths += mp.Deaths
 		damage += mp.Damage
@@ -328,16 +372,18 @@ func (c *Client) LobbyStats(ctx context.Context, puuids []string, queue string, 
 	// One batched name lookup for everyone.
 	names, _ := c.Names(ctx, puuids)
 
-	// Phase A: per-player match history + rank, fanned out.
+	// Phase A: per-player match history + rank + RR deltas, fanned out.
 	type playerData struct {
 		ids  []string
 		rank RankInfo
+		rr   map[string]int // match id → RR delta (competitive)
 	}
 	data := make([]playerData, len(puuids))
 	runBounded(ctx, len(puuids), statsConcurrency, func(i int) {
 		ids, _ := c.MatchHistory(ctx, puuids[i], queue, n)
-		rank, _ := c.PlayerMMR(ctx, puuids[i]) // ErrNotFound → zero value (unranked)
-		data[i] = playerData{ids: ids, rank: rank}
+		rank, _ := c.PlayerMMR(ctx, puuids[i])           // ErrNotFound → zero value (unranked)
+		rr, _ := c.CompetitiveUpdates(ctx, puuids[i], n) // best-effort → nil for non-ranked
+		data[i] = playerData{ids: ids, rank: rank, rr: rr}
 	})
 
 	// Dedupe match IDs across everyone so a shared match is fetched once.
@@ -373,7 +419,7 @@ func (c *Client) LobbyStats(ctx context.Context, puuids []string, queue string, 
 				ms = append(ms, md)
 			}
 		}
-		st := AggregateStats(p, ms)
+		st := AggregateStats(p, ms, data[i].rr)
 		st.Name = names[p]
 		st.Tier, st.RR, st.PeakTier = data[i].rank.Tier, data[i].rank.RR, data[i].rank.PeakTier
 		out[p] = st

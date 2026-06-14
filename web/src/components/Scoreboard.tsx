@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, Swords } from "lucide-react";
-import type { Agent, Catalog, CompetitiveTier, MatchSeat } from "@/lib/types";
+import type { Agent, Catalog, CompetitiveTier, MatchSeat, RecentMatch } from "@/lib/types";
 import { agentByUuid, rankByTier } from "@/lib/catalog";
 import { t, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -13,10 +13,13 @@ import { cn } from "@/lib/utils";
  */
 export function Scoreboard({
   players,
+  score,
   catalog,
   lang,
 }: {
   players: MatchSeat[];
+  /** Live round score (your team : enemy), or null when the PC couldn't read it. */
+  score: { ally: number; enemy: number } | null;
   catalog: Catalog | null;
   lang: Lang;
 }) {
@@ -25,8 +28,21 @@ export function Scoreboard({
 
   return (
     <div className="no-scrollbar flex-1 overflow-y-auto px-3 py-2.5">
+      {score && <ScoreHeader ally={score.ally} enemy={score.enemy} />}
       <Team label={t(lang, "teamAlly")} players={ally} catalog={catalog} lang={lang} accent />
       <Team label={t(lang, "teamEnemy")} players={enemy} catalog={catalog} lang={lang} />
+    </div>
+  );
+}
+
+/** Live round score. Your team is accent-tinted to match the "Your team" section
+ * label below, so which number is yours reads at a glance. */
+function ScoreHeader({ ally, enemy }: { ally: number; enemy: number }) {
+  return (
+    <div className="mb-3 flex items-center justify-center gap-3 rounded-xl border border-hairline bg-surface py-2">
+      <span className="text-3xl font-bold leading-none tabular-nums text-accent">{ally}</span>
+      <span className="text-xl font-semibold leading-none text-fg-mute">:</span>
+      <span className="text-3xl font-bold leading-none tabular-nums text-fg">{enemy}</span>
     </div>
   );
 }
@@ -125,6 +141,7 @@ function Row({ seat, catalog, lang }: { seat: MatchSeat; catalog: Catalog | null
           <Stat label={t(lang, "statAdr")} value={Math.round(s.adr).toString()} />
           <Stat label={t(lang, "statHs")} value={`${Math.round(s.hs_pct)}%`} />
           <Stat label={t(lang, "statWin")} value={`${Math.round(s.win_pct)}%`} />
+          <RecentRr recent={s.recent} lang={lang} />
           <div className="col-span-4 mt-0.5 px-0.5 text-right text-[10px] tabular-nums text-fg-mute">
             {s.matches} {t(lang, "matchesShort")}
           </div>
@@ -194,7 +211,7 @@ function PlayerName({ name, self, you }: { name: string; self: boolean; you: str
   );
 }
 
-function Streak({ recent }: { recent: boolean[] }) {
+function Streak({ recent }: { recent: RecentMatch[] }) {
   // Always 5 slots so every row's streak is the same width and the dots line up
   // into a clean column. Results fill from the left (newest first); unused slots
   // are transparent spacers — no ragged edges, no false "neutral" result.
@@ -206,10 +223,35 @@ function Streak({ recent }: { recent: boolean[] }) {
           key={i}
           className={cn(
             "block h-1.5 w-1.5 shrink-0 rounded-[2px] align-middle",
-            i >= r.length ? "bg-transparent" : r[i] ? "bg-green-500" : "bg-red-500",
+            i >= r.length ? "bg-transparent" : r[i].won ? "bg-green-500" : "bg-red-500",
           )}
         />
       ))}
+    </div>
+  );
+}
+
+/** Per-match RR deltas (competitive matches only) as colored +/- pills. Hidden
+ * when none of the recent matches were ranked. */
+function RecentRr({ recent, lang }: { recent: RecentMatch[]; lang: Lang }) {
+  const deltas = recent.map((m) => m.rr).filter((rr): rr is number => rr != null);
+  if (deltas.length === 0) return null;
+  return (
+    <div className="col-span-4 mt-0.5 flex items-center gap-1.5 px-0.5">
+      <span className="shrink-0 text-[9px] uppercase tracking-wide text-fg-mute">{t(lang, "recentRr")}</span>
+      <div className="flex flex-1 flex-wrap justify-end gap-1">
+        {deltas.map((d, i) => (
+          <span
+            key={i}
+            className={cn(
+              "rounded px-1 py-0.5 text-[10px] font-semibold leading-none tabular-nums",
+              d >= 0 ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400",
+            )}
+          >
+            {d >= 0 ? `+${d}` : d}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

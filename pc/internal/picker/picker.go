@@ -257,6 +257,7 @@ func (p *Picker) build(snap Snapshot, err error) State {
 	switch snap.Phase {
 	case "ingame":
 		st.State = "ingame"
+		st.ScoreAlly, st.ScoreEnemy, st.ScoreValid = snap.ScoreAlly, snap.ScoreEnemy, snap.HasScore
 		puuid := p.src.PUUID()
 		for _, pl := range snap.Players {
 			st.MatchPlayers = append(st.MatchPlayers, MatchSeat{
