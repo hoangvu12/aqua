@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AuthStatusData, Frame, GameStateMsg, ResultData } from "./types";
 import { RELAY_WS_BASE, type Creds } from "./pair";
 import { nextReqId } from "./utils";
+import { fieldPatch, overlay, type Patch } from "./optimistic";
 
 /** Relay transport health (distinct from the game phase carried inside `state`). */
 export type ConnStatus = "connecting" | "connected" | "reconnecting" | "unauthorized";
@@ -9,6 +11,12 @@ export type ConnStatus = "connecting" | "connected" | "reconnecting" | "unauthor
 const MIN_BACKOFF = 500;
 const MAX_BACKOFF = 8000;
 const CMD_TIMEOUT = 8000;
+// How long an optimistic patch lingers unconfirmed before we give up on it and let
+// pushed truth show through (guards a wrong guess / a PC that quietly disagrees).
+const OPTIMISTIC_TTL = 6000;
+
+/** The single React Query cache cell holding the pushed (then overlaid) game state. */
+const GAME_KEY = ["game"] as const;
 
 export interface SetConfigArgs {
   enabled?: boolean;
@@ -18,7 +26,8 @@ export interface SetConfigArgs {
 
 export interface Relay {
   conn: ConnStatus;
-  /** Last game state pushed by the PC (null until the first frame arrives). */
+  /** Last game state pushed by the PC, with optimistic overlays (null until the
+   * first frame arrives). Backed by the React Query cache at GAME_KEY. */
   game: GameStateMsg | null;
   /** True once any state frame has been received this session. */
   gotState: boolean;
@@ -48,16 +57,48 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
+/** Variables for the generic command mutation: the wire call plus the optimistic
+ * patches to overlay while it's in flight (omitted for unpredictable commands). */
+interface CommandVars {
+  type: string;
+  data: unknown;
+  patches?: Patch[];
+}
+
+/** Thrown by the mutation when the PC reports ok:false, so React Query's onError
+ * fires (and rolls back the patches). Carries the original result for the caller. */
+class CommandError extends Error {
+  constructor(readonly result: ResultData) {
+    super(result.message);
+  }
+}
+
 /**
  * Drives the phone↔relay WebSocket: authenticates with the stored token, auto-
  * reconnects with capped backoff, and correlates select/lock/set_config results
  * by reqId. Calls onAuthInvalid (and stops retrying) when the relay rejects the
  * token (close 4003 / auth_status ok:false), e.g. after Unpair-all on the PC.
+ *
+ * Game state lives in the React Query cache (GAME_KEY): pushed frames seed it and
+ * commands are React Query mutations that optimistically patch it on `onMutate`
+ * and roll back on `onError`. Because the truth is *pushed* (not refetchable) and
+ * the frame right after a command is often a stale poll, a small registry of
+ * in-flight patches is re-overlaid on every frame until the truth confirms them —
+ * the one bit of reconciliation the push model adds on top of stock React Query.
  */
 export function useRelay(creds: Creds | null, onAuthInvalid: () => void): Relay {
+  const qc = useQueryClient();
   const [conn, setConn] = useState<ConnStatus>("connecting");
-  const [game, setGame] = useState<GameStateMsg | null>(null);
   const [gotState, setGotState] = useState(false);
+
+  // The cache is populated by the WS (via setQueryData), never fetched — so the
+  // query is disabled and just subscribes this component to GAME_KEY.
+  const { data: game = null } = useQuery<GameStateMsg | null>({
+    queryKey: GAME_KEY,
+    queryFn: () => null,
+    enabled: false,
+    initialData: null,
+  });
 
   const wsRef = useRef<WebSocket | null>(null);
   const pending = useRef<Map<string, Pending>>(new Map());
@@ -66,6 +107,50 @@ export function useRelay(creds: Creds | null, onAuthInvalid: () => void): Relay 
   const stopped = useRef(false);
   const onAuthInvalidRef = useRef(onAuthInvalid);
   onAuthInvalidRef.current = onAuthInvalid;
+
+  // Raw last-pushed truth (kept aside from the cache so we can re-overlay patches
+  // onto it), plus the in-flight optimistic patches and their expiry timers.
+  const rawRef = useRef<GameStateMsg | null>(null);
+  const patchesRef = useRef<Map<string, Patch>>(new Map());
+  const patchTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  // Re-derive the cached view = truth + still-unconfirmed patches, retiring any the
+  // truth has caught up to. The one custom reconcile step (see overlay()).
+  const render = useCallback(() => {
+    const { view, settled } = overlay(rawRef.current, patchesRef.current.values());
+    for (const key of settled) {
+      const tm = patchTimers.current.get(key);
+      if (tm) clearTimeout(tm);
+      patchTimers.current.delete(key);
+      patchesRef.current.delete(key);
+    }
+    qc.setQueryData(GAME_KEY, view);
+  }, [qc]);
+  const renderRef = useRef(render);
+  renderRef.current = render;
+
+  const addPatch = useCallback((p: Patch) => {
+    const old = patchTimers.current.get(p.key);
+    if (old) clearTimeout(old);
+    patchesRef.current.set(p.key, p);
+    patchTimers.current.set(
+      p.key,
+      setTimeout(() => {
+        patchTimers.current.delete(p.key);
+        patchesRef.current.delete(p.key);
+        renderRef.current();
+      }, OPTIMISTIC_TTL),
+    );
+    renderRef.current();
+  }, []);
+
+  const removePatch = useCallback((key: string) => {
+    const tm = patchTimers.current.get(key);
+    if (tm) clearTimeout(tm);
+    patchTimers.current.delete(key);
+    patchesRef.current.delete(key);
+    renderRef.current();
+  }, []);
 
   useEffect(() => {
     if (!creds) return;
@@ -104,8 +189,10 @@ export function useRelay(creds: Creds | null, onAuthInvalid: () => void): Relay 
             break;
           }
           case "state":
-            setGame(f.data as GameStateMsg);
+            // New truth: stash it and re-overlay any in-flight patches onto it.
+            rawRef.current = f.data as GameStateMsg;
             setGotState(true);
+            renderRef.current();
             break;
           case "result": {
             if (f.reqId) {
@@ -150,6 +237,16 @@ export function useRelay(creds: Creds | null, onAuthInvalid: () => void): Relay 
     };
   }, [creds]);
 
+  // Drop every outstanding patch timer on unmount.
+  useEffect(() => {
+    const timers = patchTimers.current;
+    return () => {
+      for (const tm of timers.values()) clearTimeout(tm);
+      timers.clear();
+    };
+  }, []);
+
+  // Low-level: send a command and resolve with the PC's result, correlated by reqId.
   const command = useCallback((type: string, data: unknown): Promise<ResultData> => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -166,9 +263,56 @@ export function useRelay(creds: Creds | null, onAuthInvalid: () => void): Relay 
     });
   }, []);
 
-  const select = useCallback((agentId: string) => command("select", { agentId }), [command]);
-  const lock = useCallback((agentId: string) => command("lock", { agentId }), [command]);
-  const setConfig = useCallback((args: SetConfigArgs) => command("set_config", args), [command]);
+  // The one mutation behind every command: overlay the predicted patches on
+  // onMutate, send the command, and roll them back on failure. Patches that
+  // succeed are retired by `render` once a pushed frame confirms them.
+  const { mutateAsync } = useMutation<ResultData, CommandError, CommandVars>({
+    mutationFn: async ({ type, data }) => {
+      const r = await command(type, data);
+      if (!r.ok) throw new CommandError(r);
+      return r;
+    },
+    onMutate: ({ patches }) => {
+      patches?.forEach(addPatch);
+    },
+    onError: (_err, { patches }) => {
+      patches?.forEach((p) => removePatch(p.key));
+    },
+  });
+
+  // mutateAsync rejects on failure (so onError runs); re-shape that back into the
+  // ResultData the callers expect rather than a throw.
+  const runCommand = useCallback(
+    (vars: CommandVars): Promise<ResultData> =>
+      mutateAsync(vars).catch((e: unknown) =>
+        e instanceof CommandError
+          ? e.result
+          : { ok: false, message: e instanceof Error ? e.message : "error" },
+      ),
+    [mutateAsync],
+  );
+
+  // select/lock keep their own optimism in App (selectedUuid + the hold-to-lock
+  // gesture), so they carry no patches here.
+  const select = useCallback(
+    (agentId: string) => runCommand({ type: "select", data: { agentId } }),
+    [runCommand],
+  );
+  const lock = useCallback(
+    (agentId: string) => runCommand({ type: "lock", data: { agentId } }),
+    [runCommand],
+  );
+  const setConfig = useCallback(
+    (args: SetConfigArgs) => {
+      const patches: Patch[] = [];
+      if (args.auto_lock !== undefined) patches.push(fieldPatch("auto_lock", args.auto_lock));
+      if (args.prepick_agent_uuid !== undefined)
+        patches.push(fieldPatch("prepick_agent_uuid", args.prepick_agent_uuid));
+      if (args.enabled !== undefined) patches.push(fieldPatch("enabled", args.enabled));
+      return runCommand({ type: "set_config", data: args, patches });
+    },
+    [runCommand],
+  );
   const getState = useCallback(() => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "get_state" }));
@@ -176,18 +320,78 @@ export function useRelay(creds: Creds | null, onAuthInvalid: () => void): Relay 
 
   const party = useMemo<PartyActions>(
     () => ({
-      generateCode: () => command("party_generate_code", {}),
-      disableCode: () => command("party_disable_code", {}),
-      joinByCode: (code: string) => command("party_join_by_code", { code }),
-      leave: () => command("party_leave", {}),
-      kick: (puuid: string) => command("party_kick", { puuid }),
+      // Code value is Riot-assigned (unpredictable) → no patch; the drawer shows a
+      // spinner instead. Disabling a code is predictable, so it patches.
+      generateCode: () => runCommand({ type: "party_generate_code", data: {} }),
+      disableCode: () =>
+        runCommand({
+          type: "party_disable_code",
+          data: {},
+          patches: [fieldPatch("party_invite_code", "")],
+        }),
+      // Joining/leaving reshapes the whole party we don't yet know → loading UI.
+      joinByCode: (code: string) => runCommand({ type: "party_join_by_code", data: { code } }),
+      leave: () => runCommand({ type: "party_leave", data: {} }),
+      kick: (puuid: string) =>
+        runCommand({
+          type: "party_kick",
+          data: { puuid },
+          patches: [
+            {
+              key: `kick:${puuid}`,
+              apply: (g) => ({
+                ...g,
+                party_members: g.party_members.filter((m) => m.puuid !== puuid),
+              }),
+              settled: (g) => !g.party_members.some((m) => m.puuid === puuid),
+            },
+          ],
+        }),
       setAccessibility: (open: boolean) =>
-        command("party_set_accessibility", { accessibility: open ? "OPEN" : "CLOSED" }),
-      setQueue: (queueId: string) => command("party_set_queue", { queueId }),
-      startMatchmaking: () => command("party_start_matchmaking", {}),
-      stopMatchmaking: () => command("party_stop_matchmaking", {}),
+        runCommand({
+          type: "party_set_accessibility",
+          data: { accessibility: open ? "OPEN" : "CLOSED" },
+          patches: [fieldPatch("party_accessibility", open ? "OPEN" : "CLOSED")],
+        }),
+      setQueue: (queueId: string) =>
+        runCommand({
+          type: "party_set_queue",
+          data: { queueId },
+          patches: [fieldPatch("queue_id", queueId)],
+        }),
+      // Matchmaking flips the game phase, which drives the search timer + CTA. Both
+      // share one key so a quick start→cancel can't leave a stale patch behind.
+      startMatchmaking: () =>
+        runCommand({
+          type: "party_start_matchmaking",
+          data: {},
+          patches: [
+            {
+              key: "matchmaking",
+              apply: (g) => ({
+                ...g,
+                state: "queue",
+                queue_entry_time: g.queue_entry_time || Date.now(),
+              }),
+              settled: (g) => g.state === "queue",
+            },
+          ],
+        }),
+      stopMatchmaking: () =>
+        runCommand({
+          type: "party_stop_matchmaking",
+          data: {},
+          patches: [
+            {
+              key: "matchmaking",
+              apply: (g) =>
+                g.state === "queue" ? { ...g, state: "lobby", queue_entry_time: 0 } : g,
+              settled: (g) => g.state !== "queue",
+            },
+          ],
+        }),
     }),
-    [command],
+    [runCommand],
   );
 
   return { conn, game, gotState, select, lock, setConfig, getState, party };

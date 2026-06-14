@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Copy, Crown, LogOut, Search, UserMinus, X } from "lucide-react";
+import { Check, Copy, Crown, Loader2, LogOut, Search, UserMinus, X } from "lucide-react";
 import type { Catalog, GameStateMsg, PartyMember, ResultData } from "@/lib/types";
 import type { PartyActions } from "@/lib/relay";
 import { rankByTier } from "@/lib/catalog";
@@ -42,15 +42,21 @@ export function PartyDrawer({
 
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Which slow action is in flight, so its button can show a spinner. Most party
+  // actions reflect instantly via optimistic state; only the ones whose result we
+  // can't predict (generate/join code) need an explicit "working" cue.
+  const [pending, setPending] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [joinCode, setJoinCode] = useState("");
 
   // Run a party action: clear notice, await, surface any failure message inline.
-  const run = async (p: Promise<ResultData>): Promise<ResultData> => {
+  const run = async (p: Promise<ResultData>, id?: string): Promise<ResultData> => {
     setBusy(true);
+    setPending(id ?? null);
     setNotice(null);
     const r = await p;
     setBusy(false);
+    setPending(null);
     if (!r.ok) setNotice(r.message);
     return r;
   };
@@ -69,7 +75,7 @@ export function PartyDrawer({
   const submitJoin = async () => {
     const c = joinCode.trim();
     if (!c) return;
-    const r = await run(party.joinByCode(c));
+    const r = await run(party.joinByCode(c), "join");
     if (r.ok) {
       setJoinCode("");
       onClose();
@@ -132,10 +138,11 @@ export function PartyDrawer({
             <Button
               variant="surface"
               size="md"
-              onClick={() => run(party.generateCode())}
+              onClick={() => run(party.generateCode(), "generate")}
               disabled={!owner || busy}
               className="w-full"
             >
+              {pending === "generate" && <Loader2 className="h-4 w-4 animate-spin" />}
               {t(lang, "generateCode")}
             </Button>
           )}
@@ -160,6 +167,7 @@ export function PartyDrawer({
               className="h-12 flex-1 rounded-[var(--radius-tile)] border border-hairline bg-surface px-3 font-mono text-base tracking-[0.15em] text-fg outline-none placeholder:tracking-normal placeholder:text-fg-mute focus-visible:ring-2 focus-visible:ring-accent"
             />
             <Button type="submit" variant="surface" size="md" disabled={!joinCode.trim() || busy}>
+              {pending === "join" && <Loader2 className="h-4 w-4 animate-spin" />}
               {t(lang, "join")}
             </Button>
           </form>
