@@ -18,6 +18,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -66,6 +67,12 @@ type Client struct {
 	port          string
 	local         *http.Client // 127.0.0.1, self-signed → InsecureSkipVerify
 	remote        *http.Client // pvp.net, valid certs
+
+	// Match details are immutable once a match completes, so we cache them by id.
+	// Both the scoreboard (LobbyStats) and party detection (DetectParties) fetch
+	// overlapping matches; caching means a shared match hits PD only once.
+	mdMu    sync.Mutex
+	mdCache map[string]*MatchDetail
 }
 
 // Authenticate reads the lockfile, fetches local entitlements + region-locale,
@@ -82,7 +89,8 @@ func Authenticate(ctx context.Context) (*Client, error) {
 			Timeout:   8 * time.Second,
 			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 		},
-		remote: &http.Client{Timeout: 10 * time.Second},
+		remote:  &http.Client{Timeout: 10 * time.Second},
+		mdCache: make(map[string]*MatchDetail),
 	}
 
 	var ent struct {

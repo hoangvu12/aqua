@@ -142,6 +142,7 @@ func (c *Client) MatchHistory(ctx context.Context, puuid, queue string, count in
 // aggregate (damage/shots are summed across every round).
 type MatchPlayer struct {
 	Team      string
+	PartyID   string // the party this player was in *for this match* (premade detection)
 	Won       bool
 	Kills     int
 	Deaths    int
@@ -161,13 +162,46 @@ type MatchDetail struct {
 	Players map[string]MatchPlayer
 }
 
-// MatchDetails fetches a full match and reduces it to per-player MatchPlayer
-// lines (KDA + rounds from stats, damage/headshots summed from every round).
+// matchDetailsCacheMax bounds the in-memory match-details cache. Match details
+// never change once a match is over, so we keep them for the session; this cap is
+// just a backstop against unbounded growth over a very long run (each entry is a
+// small ~10-player map). On overflow the cache is dropped wholesale — crude but
+// match details are cheap to refetch and this path is rarely hit.
+const matchDetailsCacheMax = 1000
+
+// MatchDetails returns a match's per-player lines, caching by match id so a match
+// shared across LobbyStats and DetectParties (or refetched later) hits PD only
+// once. The returned value is shared and treated as read-only by callers.
 func (c *Client) MatchDetails(ctx context.Context, matchID string) (*MatchDetail, error) {
+	c.mdMu.Lock()
+	cached, ok := c.mdCache[matchID]
+	c.mdMu.Unlock()
+	if ok {
+		return cached, nil
+	}
+
+	md, err := c.fetchMatchDetails(ctx, matchID)
+	if err != nil {
+		return nil, err
+	}
+
+	c.mdMu.Lock()
+	if len(c.mdCache) >= matchDetailsCacheMax {
+		c.mdCache = make(map[string]*MatchDetail, matchDetailsCacheMax)
+	}
+	c.mdCache[matchID] = md
+	c.mdMu.Unlock()
+	return md, nil
+}
+
+// fetchMatchDetails does the actual PD fetch and reduces a full match to per-player
+// MatchPlayer lines (KDA + rounds from stats, damage/headshots summed per round).
+func (c *Client) fetchMatchDetails(ctx context.Context, matchID string) (*MatchDetail, error) {
 	var r struct {
 		Players []struct {
 			Subject string `json:"subject"`
 			TeamID  string `json:"teamId"`
+			PartyID string `json:"partyId"`
 			Stats   struct {
 				RoundsPlayed int `json:"roundsPlayed"`
 				Kills        int `json:"kills"`
@@ -203,6 +237,7 @@ func (c *Client) MatchDetails(ctx context.Context, matchID string) (*MatchDetail
 	for _, p := range r.Players {
 		md.Players[p.Subject] = MatchPlayer{
 			Team:    p.TeamID,
+			PartyID: p.PartyID,
 			Won:     won[p.TeamID],
 			Kills:   p.Stats.Kills,
 			Deaths:  p.Stats.Deaths,
