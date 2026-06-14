@@ -12,7 +12,19 @@ import (
 	"aqua/internal/config"
 )
 
-const pollInterval = time.Second // ~1 Hz across all states (plan §Polling)
+// reconcileInterval is the steady-state safety-net poll cadence. Responsiveness
+// comes from the local event stream (riot.EventStream → Refresh) for game changes
+// and from the source's onUpdate callback for async stats, so the ticker only
+// backstops missed events — not real-time updates like the old ~1 Hz poll did.
+const reconcileInterval = 15 * time.Second
+
+// pregameReconcileInterval is the cadence during agent select. The messaging
+// service does relay pregame match changes over the event stream (a live capture
+// saw ares-pregame messages on each change), so the stream usually already covers
+// allies' picks — but we still poll briskly here as a cheap backstop on the one
+// screen where a missed intra-state update is most visible. Agent select is brief,
+// so the extra polls are negligible.
+const pregameReconcileInterval = 1500 * time.Millisecond
 
 // Sink is how the picker emits frames toward the phone (via the relay).
 type Sink interface {
@@ -44,14 +56,22 @@ type Picker struct {
 
 // New builds a picker over a game source, emitting through sink.
 func New(cfg *config.Config, src Source, sink Sink) *Picker {
-	return &Picker{cfg: cfg, src: src, sink: sink, refresh: make(chan struct{}, 1)}
+	p := &Picker{cfg: cfg, src: src, sink: sink, refresh: make(chan struct{}, 1)}
+	// If the source reports async updates (live: background stats fetches), wire
+	// them to a refresh so freshly-loaded rows reach the phone immediately. The
+	// sim and test fakes don't implement this and just keep the tick cadence.
+	if u, ok := src.(interface{ SetOnUpdate(func()) }); ok {
+		u.SetOnUpdate(p.triggerRefresh)
+	}
+	return p
 }
 
 // Run polls immediately (cold-start: render whatever the game is doing now),
-// then every pollInterval, plus on demand after a phone command.
+// then reconciles on the slow ticker as a safety net while the local event
+// stream and phone commands drive prompt re-polls on demand via Refresh.
 func (p *Picker) Run(ctx context.Context) {
 	p.poll(ctx)
-	t := time.NewTicker(pollInterval)
+	t := time.NewTimer(p.reconcileDelay())
 	defer t.Stop()
 	for {
 		select {
@@ -59,10 +79,31 @@ func (p *Picker) Run(ctx context.Context) {
 			return
 		case <-t.C:
 			p.poll(ctx)
+			t.Reset(p.reconcileDelay())
 		case <-p.refresh:
 			p.poll(ctx)
+			if !t.Stop() {
+				select {
+				case <-t.C:
+				default:
+				}
+			}
+			t.Reset(p.reconcileDelay())
 		}
 	}
+}
+
+// reconcileDelay picks the safety-net poll cadence for the current state: brisk
+// during agent select (where allies' GLZ-side picks may not push over the event
+// stream), relaxed elsewhere (where presence/messaging events drive refreshes).
+func (p *Picker) reconcileDelay() time.Duration {
+	p.mu.Lock()
+	st := p.last.State
+	p.mu.Unlock()
+	if st == "pregame" || st == "locked" {
+		return pregameReconcileInterval
+	}
+	return reconcileInterval
 }
 
 // Republish re-sends the last known state. Call it when a relay connection is
@@ -83,6 +124,11 @@ func (p *Picker) triggerRefresh() {
 	default:
 	}
 }
+
+// Refresh triggers an immediate state re-poll. Safe for concurrent use and
+// coalesces with the ticker and any pending refresh, so the local event stream
+// can fire it freely on every relevant game change without piling up polls.
+func (p *Picker) Refresh() { p.triggerRefresh() }
 
 func (p *Picker) poll(ctx context.Context) {
 	snap, err := p.src.Snapshot(ctx)

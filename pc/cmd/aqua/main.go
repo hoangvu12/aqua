@@ -26,6 +26,7 @@ import (
 	"aqua/internal/config"
 	"aqua/internal/picker"
 	"aqua/internal/relay"
+	"aqua/internal/riot"
 	"aqua/internal/ui"
 	"aqua/internal/updater"
 	"aqua/internal/version"
@@ -262,6 +263,19 @@ func main() {
 			},
 			Quit: cancel,
 		})
+	}
+
+	// Local Riot Client event stream: turn game-state changes into immediate
+	// refreshes instead of waiting for the reconcile tick. Live source only — the
+	// sim has no Riot Client to listen to. It self-heals across game restarts and
+	// the reconcile poll covers any gap, so failure here is non-fatal.
+	if !*sim {
+		es := &riot.EventStream{OnEvent: func(ev riot.Event) {
+			if riot.IsMatchRelevant(ev.URI) {
+				pk.Refresh()
+			}
+		}}
+		go es.Run(ctx)
 	}
 
 	go pk.Run(ctx)

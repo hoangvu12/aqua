@@ -98,10 +98,20 @@ type riotSource struct {
 	statsKey      string                      // match id the cache is for
 	statsByPUUID  map[string]riot.PlayerStats // nil until the fetch completes
 	statsFetching bool
+
+	// onUpdate is fired when a background stats fetch fills the cache, so the
+	// picker re-emits the now-complete scoreboard without waiting for the
+	// reconcile tick. Set once via SetOnUpdate before Run; nil until then.
+	onUpdate func()
 }
 
 // NewRiotSource returns a live game source.
 func NewRiotSource() Source { return &riotSource{} }
+
+// SetOnUpdate registers a callback fired when an async stats fetch completes with
+// new rows. The picker wires this to its refresh trigger so freshly-loaded tracker
+// stats reach the phone immediately. Must be set before Run (no synchronization).
+func (s *riotSource) SetOnUpdate(fn func()) { s.onUpdate = fn }
 
 func (s *riotSource) ensure(ctx context.Context) error {
 	if s.client != nil {
@@ -314,7 +324,8 @@ func (s *riotSource) lobbyStats(c *riot.Client, matchID, queue string, puuids []
 			defer cancel()
 			res := c.LobbyStats(ctx, missing, queue, recentMatchesN)
 			s.statsMu.Lock()
-			if s.statsKey == key { // ignore if the match changed mid-fetch
+			merged := s.statsKey == key && len(res) > 0
+			if merged { // ignore if the match changed mid-fetch
 				if s.statsByPUUID == nil {
 					s.statsByPUUID = make(map[string]riot.PlayerStats, len(res))
 				}
@@ -324,6 +335,10 @@ func (s *riotSource) lobbyStats(c *riot.Client, matchID, queue string, puuids []
 			}
 			s.statsFetching = false
 			s.statsMu.Unlock()
+			// Re-emit so the new rows reach the phone now, not on the next tick.
+			if merged && s.onUpdate != nil {
+				s.onUpdate()
+			}
 		}()
 	}
 
