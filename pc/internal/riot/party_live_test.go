@@ -29,7 +29,7 @@ func TestLiveDetectParties(t *testing.T) {
 
 	// Current roster + team. Prefer coregame (both teams); fall back to pregame.
 	team := map[string]string{}
-	queue := "competitive"
+	queue := "" // all queues — a party is a party regardless of playlist
 	if mid, err := c.CoreGamePlayer(ctx); err == nil && mid != "" {
 		seats, _ := c.CoreGameMatch(ctx, mid)
 		for _, s := range seats {
@@ -55,24 +55,83 @@ func TestLiveDetectParties(t *testing.T) {
 		}
 	}
 
-	start := time.Now()
-	groups := c.DetectParties(ctx, team, queue, n)
-	elapsed := time.Since(start).Round(time.Millisecond)
-
-	// Resolve names for readable output.
 	puuids := make([]string, 0, len(team))
 	for p := range team {
 		puuids = append(puuids, p)
 	}
 	names, _ := c.Names(ctx, puuids)
 	label := func(p string) string {
-		if n := names[p]; n != "" {
-			return n
+		if nm := names[p]; nm != "" {
+			return nm
 		}
 		return p[:8]
 	}
 
-	t.Logf("scanned last %d %s matches/player in %s → %d inferred parties", n, queue, elapsed, len(groups))
+	start := time.Now()
+
+	// Inline the DetectParties steps so one pass shows the full picture with the
+	// minimum number of PD calls: exactly one history fetch per player. (0 history
+	// across the board almost always means we got rate-limited — back off and retry.)
+	hist := make([][]string, len(puuids))
+	runBounded(ctx, len(puuids), statsConcurrency, func(i int) {
+		hist[i], _ = c.MatchHistory(ctx, puuids[i], queue, n)
+	})
+	total := 0
+	for i, p := range puuids {
+		self := ""
+		if p == c.PUUID() {
+			self = " (self)"
+		}
+		t.Logf("  history %-22s%s %d", label(p), self, len(hist[i]))
+		total += len(hist[i])
+	}
+
+	count := map[string]int{}
+	for _, ids := range hist {
+		seen := map[string]bool{}
+		for _, id := range ids {
+			if id != "" && !seen[id] {
+				seen[id] = true
+				count[id]++
+			}
+		}
+	}
+	shared := []string{}
+	for id, ct := range count {
+		if ct >= 2 {
+			shared = append(shared, id)
+		}
+	}
+	past := make([]*MatchDetail, 0, len(shared))
+	for _, id := range shared {
+		md, err := c.MatchDetails(ctx, id)
+		if err != nil {
+			t.Logf("  shared match %s: fetch error: %v", id[:8], err)
+			continue
+		}
+		past = append(past, md)
+		// Show the current-match players in this shared match: their historical
+		// party + team. Same partyId on the same current team → a detected premade.
+		t.Logf("  shared match %s:", id[:8])
+		for _, p := range puuids {
+			if mp, ok := md.Players[p]; ok {
+				pid := mp.PartyID
+				if len(pid) > 8 {
+					pid = pid[:8]
+				}
+				t.Logf("      %-22s pastParty=%-8s pastTeam=%-4s nowTeam=%s", label(p), pid, mp.Team, team[p])
+			}
+		}
+	}
+	groups := InferParties(team, past)
+	elapsed := time.Since(start).Round(time.Millisecond)
+
+	t.Logf("history rows: %d | matches shared by ≥2 players: %d | scanned last %d (all queues)",
+		total, len(shared), n)
+	if total == 0 {
+		t.Fatalf("0 history rows for everyone — almost certainly rate-limited; wait ~1 min and retry")
+	}
+	t.Logf("→ %d inferred parties in %s", len(groups), elapsed)
 	if len(groups) == 0 {
 		t.Logf("(no premades detected — all solos, or none have completed a match together recently)")
 	}
